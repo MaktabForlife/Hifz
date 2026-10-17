@@ -1,23 +1,23 @@
-/* Hifzhelper build 5.0 | js/sw.js */
-// V5.0 — Sabaq Dhor date-aware suggestions and picker
-const CACHE_NAME = 'hifzhelper-v5.0'; // V5.0 Sabaq Dhor planning
+/* Hifzhelper build 5.1 | js/sw.js */
+// V5.1 — Academy banners and the production integration rollout
+const CACHE_NAME = 'hifzhelper-v5.1'; // V5.1 release cache
 // Kept in sync with index.html's ?v= query strings (V3.6) so this list
 // stays correct for whenever this service worker is actually registered
 // (Level 2, not yet done) — it is currently inert, this is a
 // no-behavior-change consistency edit only.
 const ASSETS = [
-  './js/maktabAttendanceReport.js?v=5.0',
-  './index.html', './manifest.json', './js/pwaManifest.js?v=5.0', 'shared/data.js?v=5.0', 'shared/haidhRules.js?v=5.0', './appicons/logo.png',
-  './css/tokens.css?v=5.0', './css/base.css?v=5.0', './css/nav.css?v=5.0', './css/journal-table.css?v=5.0', './css/daily-report.css?v=5.0',
-  './css/components.css?v=5.0', './css/detail-pages.css?v=5.0', './css/settings.css?v=5.0', './css/admin.css?v=5.0',
-  './css/haidh.css?v=5.0', './css/juzTracker.css?v=5.0', './css/sih.css?v=5.0',
-  './js/icons.js?v=5.0', './js/customDate.js?v=5.0', './js/api.js?v=5.0', './js/logContext.js?v=5.0', './js/uiSwitch.js?v=5.0', './js/position.js?v=5.0',
-  './js/auth.js?v=5.0', './js/home.js?v=5.0', './js/tajweed.js?v=5.0',
-  './js/commentPrivacy.js?v=5.0', './js/maktabSummary.js?v=5.0', './js/maktabDailyReport.js?v=5.0', './js/maktabSettings.js?v=5.0', './js/maktabSetup.js?v=5.0', './js/maktabDay.js?v=5.0', './js/maktabJournal.js?v=5.0', './js/maktabCalendarPage.js?v=5.0', './js/maktabAttendancePage.js?v=5.0', './js/session-timer.js?v=5.0', './js/journal.js?v=5.0', './js/dhorPage.js?v=5.0',
-  './js/sabaqPage.js?v=5.0', './js/sabaqDhorPage.js?v=5.0', './js/reflectionCard.js?v=5.0',
-  './js/logDetailScreen.js?v=5.0', './js/haidhDetailScreen.js?v=5.0', './js/kaabaTracker.js?v=5.0',
-  './js/juzTrackerScreen.js?v=5.0', './js/sihScreen.js?v=5.0', './assets/quran-heart.svg?v=5.0', './assets/quran-heart-regions.json?v=5.0', './assets/quran-heart-lines.svg?v=5.0',
-  './js/settingsScreen.js?v=5.0', './js/adminPage.js?v=5.0', './js/app.js?v=5.0'
+  './js/maktabAttendanceReport.js?v=5.1',
+  './index.html', './manifest.json', './js/pwaManifest.js?v=5.1', 'shared/data.js?v=5.1', 'shared/haidhRules.js?v=5.1', './appicons/logo.png', './appicons/academy.png', './js/headerDate.js?v=5.1',
+  './css/tokens.css?v=5.1', './css/base.css?v=5.1', './css/nav.css?v=5.1', './css/journal-table.css?v=5.1', './css/daily-report.css?v=5.1',
+  './css/components.css?v=5.1', './css/detail-pages.css?v=5.1', './css/settings.css?v=5.1', './css/admin.css?v=5.1',
+  './css/haidh.css?v=5.1', './css/juzTracker.css?v=5.1', './css/sih.css?v=5.1',
+  './js/icons.js?v=5.1', './js/customDate.js?v=5.1', './js/api.js?v=5.1', './js/logContext.js?v=5.1', './js/uiSwitch.js?v=5.1', './js/position.js?v=5.1',
+  './js/auth.js?v=5.1', './js/home.js?v=5.1', './js/tajweed.js?v=5.1',
+  './js/commentPrivacy.js?v=5.1', './js/maktabSummary.js?v=5.1', './js/maktabDailyReport.js?v=5.1', './js/maktabSettings.js?v=5.1', './js/maktabSetup.js?v=5.1', './js/maktabDay.js?v=5.1', './js/maktabJournal.js?v=5.1', './js/maktabCalendarPage.js?v=5.1', './js/maktabAttendancePage.js?v=5.1', './js/session-timer.js?v=5.1', './js/journal.js?v=5.1', './js/dhorPage.js?v=5.1',
+  './js/sabaqPage.js?v=5.1', './js/sabaqDhorPage.js?v=5.1', './js/reflectionCard.js?v=5.1',
+  './js/logDetailScreen.js?v=5.1', './js/haidhDetailScreen.js?v=5.1', './js/kaabaTracker.js?v=5.1',
+  './js/juzTrackerScreen.js?v=5.1', './js/sihScreen.js?v=5.1', './assets/quran-heart.svg?v=5.1', './assets/quran-heart-regions.json?v=5.1', './assets/quran-heart-lines.svg?v=5.1',
+  './js/settingsScreen.js?v=5.1', './js/adminPage.js?v=5.1', './js/app.js?v=5.1'
 ];
 
 self.addEventListener('install', (event) => {

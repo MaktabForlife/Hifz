@@ -1,4 +1,4 @@
-/* Hifzhelper build 5.0 | js/api.js */
+/* Hifzhelper build 5.1 | js/api.js */
 // ============================================================
 // Hifzhelper — API client (V3)
 // Plain classic script (not an ES module) for the same file:// portability
@@ -6,7 +6,7 @@
 // ============================================================
 
 // Environment selection is kept here for every API request. The Academy-branded
-// hostname is development while the separate-account integration is being tested.
+// hostname uses production; the original development Pages host stays isolated.
 // A storage privacy restriction must not make a development hostname use production.
 // The existing manual override remains available for deliberate local development.
 const API_BASE = (() => {
@@ -16,15 +16,21 @@ const API_BASE = (() => {
   } catch (e) { /* Host-based routing still works without browser storage. */ }
   try {
     const h = location.hostname.toLowerCase();
-    if (h.includes('-dev') || h === 'localhost' || h === '127.0.0.1' || h === 'hifz.maktab4life.org') {
+    if (h.includes('-dev') || h === 'localhost' || h === '127.0.0.1') {
       return 'https://hifzhelper-api-dev.hifzhelper-app.workers.dev';
     }
   } catch (e) { /* No location in standalone harnesses/file-based tools. */ }
   return 'https://hifzhelper-api.hifzhelper-app.workers.dev';
 })();
 
-const ACADEMY_INTEGRATION = API_BASE==='https://hifzhelper-api-dev.hifzhelper-app.workers.dev'
-  ? Object.freeze({home:'https://maktab4life.org/academy/',handoff:'https://maktab4life.org/academy/hifz/',hifzOrigin:'https://hifz.maktab4life.org',origins:Object.freeze({'1':'https://maktab4life.org',www:'https://www.maktab4life.org',pages:'https://academy-maktab4life.pages.dev'})}) : null;
+const ACADEMY_INTEGRATION = [
+  'https://hifzhelper-api-dev.hifzhelper-app.workers.dev','https://hifzhelper-api.hifzhelper-app.workers.dev'
+].includes(API_BASE) ? Object.freeze({
+  home:'https://maktab4life.org/academy/',handoff:'https://maktab4life.org/academy/hifz/',
+  environment:API_BASE==='https://hifzhelper-api-dev.hifzhelper-app.workers.dev'?'development':'production',
+  hifzOrigin:API_BASE==='https://hifzhelper-api-dev.hifzhelper-app.workers.dev'?'https://hifzhelper-dev.pages.dev':'https://hifz.maktab4life.org',
+  origins:Object.freeze({'1':'https://maktab4life.org',www:'https://www.maktab4life.org',pages:'https://academy-maktab4life.pages.dev'})
+}) : null;
 
 const TOKEN_KEY = 'hh_token';
 const REMEMBERED_ID_KEY = 'hh_login_id';

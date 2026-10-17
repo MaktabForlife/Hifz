@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Hifzhelper build 5.0 | index.html -->
+<!-- Hifzhelper build 5.1 | index.html -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -22,20 +22,20 @@
      manifest's generic start_url. Other platforms still receive the full
      installable manifest. Runs in <head> before Add to Home Screen can read
      the page's installation metadata. -->
-<script src="js/pwaManifest.js?v=5.0"></script>
+<script src="js/pwaManifest.js?v=5.1"></script>
 
-<link rel="stylesheet" href="css/tokens.css?v=5.0">
-<link rel="stylesheet" href="css/base.css?v=5.0">
-<link rel="stylesheet" href="css/nav.css?v=5.0">
-<link rel="stylesheet" href="css/journal-table.css?v=5.0">
-<link rel="stylesheet" href="css/daily-report.css?v=5.0">
-<link rel="stylesheet" href="css/components.css?v=5.0">
-<link rel="stylesheet" href="css/detail-pages.css?v=5.0">
-<link rel="stylesheet" href="css/settings.css?v=5.0">
-<link rel="stylesheet" href="css/admin.css?v=5.0">
-<link rel="stylesheet" href="css/haidh.css?v=5.0">
-<link rel="stylesheet" href="css/juzTracker.css?v=5.0">
-<link rel="stylesheet" href="css/sih.css?v=5.0">
+<link rel="stylesheet" href="css/tokens.css?v=5.1">
+<link rel="stylesheet" href="css/base.css?v=5.1">
+<link rel="stylesheet" href="css/nav.css?v=5.1">
+<link rel="stylesheet" href="css/journal-table.css?v=5.1">
+<link rel="stylesheet" href="css/daily-report.css?v=5.1">
+<link rel="stylesheet" href="css/components.css?v=5.1">
+<link rel="stylesheet" href="css/detail-pages.css?v=5.1">
+<link rel="stylesheet" href="css/settings.css?v=5.1">
+<link rel="stylesheet" href="css/admin.css?v=5.1">
+<link rel="stylesheet" href="css/haidh.css?v=5.1">
+<link rel="stylesheet" href="css/juzTracker.css?v=5.1">
+<link rel="stylesheet" href="css/sih.css?v=5.1">
 </head>
 <body>
 
@@ -184,15 +184,26 @@
 <!-- ================= APP SHELL ================= -->
 <div id="appShell" style="display:none;">
 
-  <header id="authBand">
-    <span class="user-name"></span>
-    <!-- V4.2.15.8: one shared Hifz-class Zoom action, visible throughout
-         the authenticated app wherever this band appears. -->
-    <a id="authBandZoom" class="auth-band-zoom hidden" href="#" target="_blank" rel="noopener noreferrer" aria-label="Open Hifz class Zoom">ZOOM</a>
-    <button id="authBandToggle"></button>
+  <header id="authBand" aria-label="HifzHelper banners">
+    <div class="hifz-brand-banner">
+      <a class="hifz-academy-brand" href="#home" id="hifzBrandHome" aria-label="HifzHelper home">
+        <img src="appicons/academy.png" alt="">
+        <span><strong>Umm Abbad<br>Academy</strong><small id="hifzHeaderVersion">HifzHelper</small></span>
+      </a>
+      <aside class="hifz-date-box" aria-label="Today’s Hijri and Gregorian dates">
+        <em id="hifzHijriDate" title="Hijri date from Jamiat">Loading Hijri date…</em>
+        <time id="hifzGregorianDate"></time>
+      </aside>
+    </div>
+    <section class="hifz-account-banner" aria-label="Hifz account">
+      <div class="hifz-profile"><span>Ahlan wa Sahlan</span><strong class="user-name"></strong><small id="hifzHeaderRole"></small></div>
+      <div id="hifzPageActions" role="group" aria-label="Page actions">
+        <a id="authBandZoom" class="auth-band-zoom hidden" href="#" target="_blank" rel="noopener noreferrer" aria-label="Open Hifz class Zoom">ZOOM</a>
+      </div>
+      <nav id="authDropdownNav" aria-label="Hifz navigation"></nav>
+    </section>
   </header>
   <div id="welcomeBanner"></div>
-  <nav id="authDropdown"><div class="dropdown-inner" id="authDropdownNav"></div></nav>
 
   <main id="appContent">
 
@@ -1409,42 +1420,43 @@
      on open), never auto-started. -->
 <session-timer id="dhorTimerHost" target="40" accent="#829672" class="hidden"></session-timer>
 
-<script src="shared/data.js?v=5.0"></script>
-<script src="shared/haidhRules.js?v=5.0"></script>
-<script src="js/icons.js?v=5.0"></script>
-<script src="js/customDate.js?v=5.0"></script>
-<script src="js/api.js?v=5.0"></script>
-<script src="js/logContext.js?v=5.0"></script>
-<script src="js/uiSwitch.js?v=5.0"></script>
-<script src="js/position.js?v=5.0"></script>
-<script src="js/auth.js?v=5.0"></script>
-<script src="js/home.js?v=5.0"></script>
-<script src="js/tajweed.js?v=5.0"></script>
-<script src="js/commentPrivacy.js?v=5.0"></script>
-<script src="js/session-timer.js?v=5.0"></script>
-<script src="js/journal.js?v=5.0"></script>
-<script src="js/maktabSummary.js?v=5.0"></script>
-<script src="js/maktabDailyReport.js?v=5.0"></script>
-<script src="js/maktabSettings.js?v=5.0"></script>
-<script src="js/maktabSetup.js?v=5.0"></script>
-<script src="js/maktabDay.js?v=5.0"></script>
-<script src="js/maktabJournal.js?v=5.0"></script>
-<script src="js/maktabCalendarPage.js?v=5.0"></script>
-<script src="js/maktabAttendancePage.js?v=5.0"></script>
-<script src="js/dhorPage.js?v=5.0"></script>
-<script src="js/sabaqPage.js?v=5.0"></script>
-<script src="js/sabaqDhorPage.js?v=5.0"></script>
-<script src="js/reflectionCard.js?v=5.0"></script>
-<script src="js/logDetailScreen.js?v=5.0"></script>
-<script src="js/haidhDetailScreen.js?v=5.0"></script>
-<script src="js/kaabaTracker.js?v=5.0"></script>
-<script src="js/juzTrackerScreen.js?v=5.0"></script>
-<script src="js/sihScreen.js?v=5.0"></script>
-<script src="js/settingsScreen.js?v=5.0"></script>
-<script src="js/adminPage.js?v=5.0"></script>
-<script src="js/versionStamp.js?v=5.0"></script>
-<script src="js/academy-handoff.js?v=5.0"></script>
-<script src="js/app.js?v=5.0"></script>
-<script src="js/maktabAttendanceReport.js?v=5.0"></script>
+<script src="shared/data.js?v=5.1"></script>
+<script src="shared/haidhRules.js?v=5.1"></script>
+<script src="js/icons.js?v=5.1"></script>
+<script src="js/customDate.js?v=5.1"></script>
+<script src="js/api.js?v=5.1"></script>
+<script src="js/logContext.js?v=5.1"></script>
+<script src="js/uiSwitch.js?v=5.1"></script>
+<script src="js/position.js?v=5.1"></script>
+<script src="js/headerDate.js?v=5.1"></script>
+<script src="js/auth.js?v=5.1"></script>
+<script src="js/home.js?v=5.1"></script>
+<script src="js/tajweed.js?v=5.1"></script>
+<script src="js/commentPrivacy.js?v=5.1"></script>
+<script src="js/session-timer.js?v=5.1"></script>
+<script src="js/journal.js?v=5.1"></script>
+<script src="js/maktabSummary.js?v=5.1"></script>
+<script src="js/maktabDailyReport.js?v=5.1"></script>
+<script src="js/maktabSettings.js?v=5.1"></script>
+<script src="js/maktabSetup.js?v=5.1"></script>
+<script src="js/maktabDay.js?v=5.1"></script>
+<script src="js/maktabJournal.js?v=5.1"></script>
+<script src="js/maktabCalendarPage.js?v=5.1"></script>
+<script src="js/maktabAttendancePage.js?v=5.1"></script>
+<script src="js/dhorPage.js?v=5.1"></script>
+<script src="js/sabaqPage.js?v=5.1"></script>
+<script src="js/sabaqDhorPage.js?v=5.1"></script>
+<script src="js/reflectionCard.js?v=5.1"></script>
+<script src="js/logDetailScreen.js?v=5.1"></script>
+<script src="js/haidhDetailScreen.js?v=5.1"></script>
+<script src="js/kaabaTracker.js?v=5.1"></script>
+<script src="js/juzTrackerScreen.js?v=5.1"></script>
+<script src="js/sihScreen.js?v=5.1"></script>
+<script src="js/settingsScreen.js?v=5.1"></script>
+<script src="js/adminPage.js?v=5.1"></script>
+<script src="js/versionStamp.js?v=5.1"></script>
+<script src="js/academy-handoff.js?v=5.1"></script>
+<script src="js/app.js?v=5.1"></script>
+<script src="js/maktabAttendanceReport.js?v=5.1"></script>
 </body>
 </html>

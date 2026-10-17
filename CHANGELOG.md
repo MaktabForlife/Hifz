@@ -5,6 +5,24 @@ future delivery only needs those specific files re-uploaded — not the whole
 repo. See `SETUP.md` for initial setup, `SCHEMA.md`/`CONVENTIONS.md` for the
 standing reference docs (those aren't repeated here unless they change).
 
+## V5.1 — Academy banners and Hifz navigation (2026-10-17)
+
+The authenticated app uses Academy's two top banners: local Academy branding,
+Hijri/Gregorian dates, the Hifz profile, Home/Refresh/Sign out and the existing
+class Zoom link. Hifz's role-aware destinations replace LEARN/TEACH/ADMIN and
+highlight the current screen. Surahs in My Heart and the Kaaba/Juz puzzle are
+omitted from navigation and Home tiles; their records and components remain.
+
+The date source matches Academy but is fetched and cached by the Hifz Worker,
+without Academy API calls, credentials or D1 access. Mobile navigation scrolls
+horizontally; sticky journal headings follow the full measured banner height.
+
+Production is `hifz.maktab4life.org`; development returns to `hifzhelper-dev.pages.dev`.
+The production database is upgraded in place with verified Academy IDs and the
+same shared PIN/signing keys. Existing legacy credentials remain supported and
+upgrade on the next Academy PIN sign-in. Academy remains authoritative for
+profile fields, Hifz roles/status and PIN resets. See ACADEMY-SIGNIN.md.
+
 ## V5.0 — Academy PIN and sign-in handoff (2026-10-17)
 
 New/reset Academy-linked PINs are chosen and confirmed in Academy. Both systems

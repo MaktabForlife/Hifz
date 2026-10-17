@@ -1,144 +1,35 @@
-/* Hifzhelper build 4.2.15.7 | css/nav.css */
-/* ============================================================
-   Hifzhelper — navigation: auth band, dropdown menu, home tiles
-   ============================================================ */
-
-/* ---- Auth band across the top ---- */
-#authBand {
-  background: var(--color-banner);
-  color: var(--color-banner-text);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  /* padding-top adds the device's safe-area inset (the iOS notch/status
-     bar) on top of the normal spacing — confirmed Safari-only issue
-     (Android was fine): viewport-fit=cover lets the band's background
-     extend under the status bar for a full-bleed look, but without this
-     the actual TEXT inside it (and by extension #welcomeBanner/#appContent
-     right below it) rendered under the notch too. env() falls back to 0px
-     on browsers/devices without a safe area, so this is a no-op there. */
-  padding: var(--space-sm) var(--space-md);
-  padding-top: calc(var(--space-sm) + env(safe-area-inset-top, 0px));
-  position: sticky;
-  top: 0;
-  z-index: 100;
-}
-#authBand .user-name {
-  font-weight: 600;
-  font-size: 15px;
-}
-/* V4.2.15.7: true centre of the authenticated band, independent of the
-   user-name/menu widths. Only journal screens unhide it in js/auth.js. */
-.auth-band-zoom {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 76px;
-  min-height: 34px;
-  padding: 6px 16px;
-  box-sizing: border-box;
-  border-radius: var(--radius-sm, 8px);
-  background: #0B5CFF;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 800;
-  letter-spacing: .04em;
-  text-decoration: none;
-  z-index: 1;
-}
-.auth-band-zoom:hover, .auth-band-zoom:focus-visible { filter: brightness(.96); color: #fff; }
-.auth-band-zoom.hidden { display: none; }
-#authBandToggle {
-  color: var(--color-banner-text);
-  display: flex;
-  align-items: center;
-  gap: var(--space-xs);
-  padding: var(--space-xs) var(--space-sm);
-}
-#authBandToggle svg { width: 20px; height: 20px; transition: transform 0.15s; }
-#authBandToggle.open svg { transform: rotate(180deg); }
-
-/* Slide-down menu — appears directly under the band.
-   2026-08-03: now fixed to the viewport rather than sitting in normal
-   document flow. #authBand is sticky, so it correctly stays pinned to
-   the top as the page scrolls -- but this element had no positioning of
-   its own, so it opened at its original spot near the top of the
-   document. Once scrolled past, tapping the (still-reachable) toggle
-   looked like it did nothing: the menu genuinely opened, just off-screen
-   above the current view. --auth-band-height is set live in JS
-   (js/auth.js's toggleAuthDropdown) rather than hardcoded here, since
-   the band's real height varies by device (env(safe-area-inset-top) for
-   a notch) -- the fallback below only matters before that JS has run
-   for the first time. */
-/* V3.74.1 — the menu is a vertical strip down the RIGHT, not a band across
-   the full width. It only ever holds 6-8 items; stretching them across the
-   screen in a 4- or 6-column grid meant long labels wrapped while most of
-   the row sat empty, and the eye had to travel the whole width to read a
-   short list.
-
-   Anchored to the right edge under the auth band, which is where the
-   toggle that opens it lives — so it opens beside its own button rather
-   than somewhere else entirely.
-
-   Animating max-height still works for a vertical list, but the value has
-   to clear the tallest case (8 items) or the last one is clipped. Sized
-   generously and paired with overflow-y so a longer menu scrolls rather
-   than truncating silently. */
-#authDropdown {
-  background: var(--color-surface);
-  border-left: 1px solid var(--color-table-border);
-  border-bottom: 1px solid var(--color-table-border);
-  max-height: 0;
-  overflow: hidden;
-  transition: max-height 0.2s ease;
-  position: fixed;
-  right: 0;
-  left: auto;
-  width: 25%;
-  min-width: 200px;   /* 25% of a phone is unusably narrow for a label */
-  max-width: 320px;
-  top: var(--auth-band-height, 60px);
-  z-index: 99;
-  box-shadow: -2px 4px 12px rgba(0, 0, 0, 0.08);
-}
-#authDropdown.open {
-  max-height: calc(100vh - var(--auth-band-height, 60px));
-  overflow-y: auto;
-}
-/* Each item becomes a ROW: icon then label, left-aligned, so the labels
-   line up as a list. .nav-icon-item is column-stacked and centred for the
-   Home TILES, which keep that shape — this only overrides it in here. */
-#authDropdown .dropdown-inner {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding: var(--space-sm);
-}
-#authDropdown .nav-icon-item {
-  flex-direction: row;
-  align-items: center;
-  justify-content: flex-start;
-  gap: var(--space-sm);
-  width: 100%;
-  text-align: left;
-  padding: var(--space-sm) var(--space-md);
-  border-radius: var(--radius-sm, 8px);
-}
-#authDropdown .nav-icon-item:hover { background: var(--surface-track); }
-/* The icon column is fixed so every label starts at the same x. */
-#authDropdown .nav-icon-item-icon { flex: 0 0 28px; }
-#authDropdown .dropdown-divider {
-  /* grid-column dropped with the grid (V3.74.1); a flex child spans the
-     full width on its own. */
-  border-top: 1px solid var(--color-table-border);
-  margin: var(--space-xs) 0;
-}
-/* Sets it apart as the one different-in-kind action in this menu — only
-   the icon turns red, the "Log out" label stays the normal ink color. */
-#logoutBtn svg { color: var(--color-error); }
+/* Hifzhelper build 5.1 | css/nav.css */
+/* Academy's two banners, with local role-aware Hifz navigation. */
+#authBand{position:sticky;top:0;z-index:100;background:#fffcff;color:#58305f;box-shadow:0 3px 12px #37203c10;font-family:Arial,sans-serif;--hifz-gutter:clamp(12px,3vw,28px)}
+.hifz-brand-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:64px;padding:8px var(--hifz-gutter);padding-top:calc(8px + env(safe-area-inset-top,0px));border-bottom:1px solid #ded0e2}
+.hifz-academy-brand{display:flex;align-items:center;gap:10px;color:#302936;text-decoration:none}
+.hifz-academy-brand img{width:40px;height:40px;object-fit:contain}
+.hifz-academy-brand strong{display:block;font:400 16px/1.06 Georgia,serif}
+.hifz-academy-brand small{display:block;margin-top:4px;font:600 9px/1.2 Arial,sans-serif;color:#58305f}
+.hifz-date-box{display:grid;gap:4px;flex:none;padding:6px 10px;border:1px solid #ded0e2;border-radius:10px;background:#f6eff8;text-align:right;font:11px/1.2 Arial,sans-serif}
+.hifz-date-box em{font-size:10px}
+.hifz-account-banner{display:grid;grid-template-columns:minmax(140px,.65fr) auto minmax(0,2fr);gap:16px;align-items:center;padding:8px var(--hifz-gutter);border-bottom:1px solid #ded0e2}
+.hifz-profile{min-width:0;overflow-wrap:anywhere}
+.hifz-profile>span{display:block;font-size:10px;margin-bottom:2px}
+#authBand .user-name{display:block;font:700 13px/1.25 Arial,sans-serif}
+.hifz-profile>small{display:block;font-size:10px;margin-top:2px}
+#hifzPageActions{display:flex;align-items:center;gap:5px;flex:none}
+.hifz-page-action{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;min-width:44px;min-height:60px;padding:0;color:#58305f;font:500 10px/1.2 Arial,sans-serif}
+.hifz-page-action .nav-icon-item-icon{display:grid;place-items:center;width:44px;height:44px;border:1px solid #ded0e2;border-radius:50%;background:#fff}
+.hifz-page-action svg{width:22px;height:22px}
+#logoutBtn{min-width:64px;min-height:44px;padding:10px;border:1px solid #ded0e2;border-radius:999px;background:#fff;font:600 12px Arial,sans-serif}
+#logoutBtn .nav-icon-item-icon{display:none}
+.auth-band-zoom{display:inline-flex;align-items:center;justify-content:center;min-width:64px;min-height:34px;padding:6px 10px;border-radius:8px;background:#0b5cff;color:#fff;font:800 12px Arial,sans-serif;letter-spacing:.04em;text-decoration:none}
+.auth-band-zoom.hidden{display:none}
+#authDropdownNav{display:flex;flex-wrap:wrap;gap:4px;min-width:0;padding:3px;border-radius:12px;background:#f3eaf5}
+#authDropdownNav .dropdown-divider{display:none}
+#authDropdownNav .nav-icon-item{display:flex;flex-direction:row;flex:0 1 auto;align-items:center;justify-content:center;gap:6px;min-width:0;min-height:44px;padding:10px 12px;border:0;border-radius:9px;background:transparent;color:#674270;font:700 12px/1.2 Arial,sans-serif}
+#authDropdownNav .nav-icon-item-icon{display:none}
+#authDropdownNav .nav-icon-item[aria-pressed=true]{background:#805088;color:#fff}
+#authBand :is(button,a):focus-visible{outline:3px solid #805088;outline-offset:2px}
+#authBand :is(button,a):hover{filter:brightness(.96)}
+@media(max-width:1100px){.hifz-account-banner{grid-template-columns:minmax(0,1fr) auto;gap:8px}#authDropdownNav{grid-column:1/-1}}
+@media(max-width:600px){#authDropdownNav{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:thin}#authDropdownNav .nav-icon-item{flex:0 0 auto;white-space:nowrap}.hifz-date-box{font-size:10px;padding:5px 7px}.hifz-academy-brand{gap:7px}.hifz-academy-brand strong{font-size:15px}.auth-band-zoom{min-width:52px;padding:6px;font-size:11px}#logoutBtn{min-width:58px;padding:8px;font-size:11px}}
 
 /* ---- Home page (V3.41.1 restructure, V3.43 reconsidered) ---- */
 /* V3.43: Home's own olive/sage screen background (V3.41.1) is REMOVED

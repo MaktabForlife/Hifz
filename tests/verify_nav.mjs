@@ -86,7 +86,7 @@ check('admin still gets User Management and Maktab Settings in the requested ord
   const ids = () => w.eval('visibleNavItems().map(i => i.id)');
 
   let v = ids();
-  for (const id of ['journal', 'logDetail', 'reflections', 'settings', 'attendancePage', 'juzTracker', 'sih']) {
+  for (const id of ['journal', 'logDetail', 'reflections', 'settings', 'attendancePage']) {
     check(`student sees '${id}' — her whole personal journal is back`, v.includes(id), v.join(','));
   }
   check('student sees her own Maktab Journal (V3.70.2 — server-scoped to her rows)',
@@ -102,7 +102,7 @@ check('admin still gets User Management and Maktab Settings in the requested ord
   }
   check('no student screen leaks onto a teaching profile',
     !v.some(id => ['journal','logDetail','reflections','settings','attendancePage','maktabJournal'].includes(id)));
-  check('teacher keeps Juz Tracker and Surahs in my Heart', v.includes('juzTracker') && v.includes('sih'));
+  check('teacher omits the colouring and puzzle activities', !v.includes('juzTracker') && !v.includes('sih'));
   check('teacher gets the Maktab summary', v.includes('maktabSummary'));
   check('teacher gets no admin items', !v.includes('admin') && !v.includes('maktabSettings'));
 
@@ -195,25 +195,11 @@ check('the Home dropdown button goes Home, not the maktab',
   /homeDropdownBtn[\s\S]{0,600}showScreen\('home'\)/.test(auth)
   && !/showScreen\(isTeachingProfile\(\) \? 'maktabSummary'/.test(auth));
 
-// ---------- V3.74.1: the menu is a right-hand vertical strip ----------
-{
-  const nav = read('css/nav.css');
-  check('the menu is anchored right, not stretched across the width',
-    /#authDropdown \{[\s\S]{0,600}right: 0;[\s\S]{0,200}left: auto;/.test(nav));
-  check('it takes about a quarter of the width', /#authDropdown \{[\s\S]{0,600}width: 25%;/.test(nav));
-  check('with a floor and ceiling — 25% of a phone is unusably narrow',
-    /min-width: 200px/.test(nav) && /max-width: 320px/.test(nav));
-  check('items are laid out as a vertical list',
-    /#authDropdown \.dropdown-inner \{[\s\S]{0,160}flex-direction: column;/.test(nav));
-  check('and each item is a row: icon then label, left aligned',
-    /#authDropdown \.nav-icon-item \{[\s\S]{0,220}flex-direction: row;/.test(nav));
-  check('the old 4/6-column grid rules are GONE, not just overridden',
-    !/grid-template-columns: repeat\(4, 1fr\)/.test(nav) && !/grid-template-columns: repeat\(6, 1fr\)/.test(nav));
-  check('a long menu scrolls rather than clipping its last item',
-    /#authDropdown\.open \{[\s\S]{0,160}overflow-y: auto;/.test(nav));
-  check('the Home TILES keep their stacked centred shape — only the menu changed',
-    /\.nav-icon-item \{[\s\S]{0,120}flex-direction: column;/.test(read('css/base.css')));
-}
+// V5.1: Academy banners replace the old dropdown with a persistent Hifz menu.
+check('the navigation is inline in the second banner', /class="hifz-account-banner"[\s\S]*?<nav id="authDropdownNav"/.test(html));
+check('the retired dropdown and toggle are absent', !/id="authDropdown"|id="authBandToggle"/.test(html));
+check('small-screen navigation can scroll without clipping the last destination', /#authDropdownNav\{flex-wrap:nowrap;overflow-x:auto/.test(nav));
+check('Home tiles retain their stacked icon layout', /\.nav-icon-item \{[\s\S]{0,120}flex-direction: column;/.test(read('css/base.css')));
 
 // ---------- V3.74.0: the Maktab item has its own icon ----------
 // It borrowed 'sabaq' — three dots — which is ALSO the Sabaq card header

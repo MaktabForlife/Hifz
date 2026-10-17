@@ -88,15 +88,15 @@ check('6: but the id is still RENDERED, so copy and search still have it',
   const a = groups('admin');
   check('7: admin group 1 follows V4.2.11.2 primary order',
     JSON.stringify(a[0]) === JSON.stringify(['home', 'maktabSummary', 'maktabAttendance', 'admin', 'maktabSettings']), JSON.stringify(a[0]));
-  check('7: group 2 leads with Surahs, Juz Tracker, Timer',
-    JSON.stringify(a[1].slice(0, 3)) === JSON.stringify(['sih', 'juzTracker', 'timer']), JSON.stringify(a[1]));
+  check('7: V5.1 staff personal-tools group contains only Timer',
+    JSON.stringify(a[1]) === JSON.stringify(['timer']), JSON.stringify(a[1]));
   check('7: the last group is Refresh, Switch account, Log out (Switch account added V3.77.0 (j))',
     JSON.stringify(a[a.length - 1]) === JSON.stringify(['refresh', 'switchAccount', 'logout']));
 
   const s = groups('student');
   check('7: student primary menu follows the V4.2.15.7 journal order',
     JSON.stringify(s[0]) === JSON.stringify(['home','journal','logDetail','attendancePage','settings','maktabJournal']) && s.every(g => g.length > 0), JSON.stringify(s));
-  check('7: and keeps reflections and Surahs among personal tools', s[1].includes('reflections') && s[1].includes('sih'));
+  check('7: keeps Tadabbur and Timer without the excluded activities', s[1].includes('reflections') && s[1].includes('timer') && !s[1].includes('sih') && !s[1].includes('juzTracker'));
   check('7: dividers go BETWEEN groups, never trailing',
     /visibleNavGroups\(\)\.map\(g => g\.map\(btn\)\.join\(''\)\)\.join\('<div class="dropdown-divider"><\/div>'\)/.test(auth));
   check('7: the Home tile grid takes screens only, not Timer or Log out',

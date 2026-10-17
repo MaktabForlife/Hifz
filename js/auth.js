@@ -1,4 +1,4 @@
-/* Hifzhelper build 5.0 | js/auth.js */
+/* Hifzhelper build 5.1 | js/auth.js */
 // ============================================================
 // Hifzhelper — auth: login screen, top auth band, dropdown menu
 // ============================================================
@@ -115,7 +115,7 @@ function isTeachingProfile(){
 function visibleNavGroups(){
   const hidePJ = isTeachingProfile();
   const byId = (id) => NAV_ITEMS.find(x => x.id === id);
-  const keep = (item) => item && !(hidePJ && HIDDEN_PJ_NAV_IDS.has(item.id));
+  const keep = (item) => item && !['sih','juzTracker'].includes(item.id) && !(hidePJ && HIDDEN_PJ_NAV_IDS.has(item.id));
 
   // V4.2.15.7: the Personal Journal menu order is explicit:
   // Home → Summary → Detail → Attendance → Settings → Maktab Journal.
@@ -146,7 +146,7 @@ function visibleNavGroups(){
   const g3 = [
     { id: 'refresh', label: 'Refresh', icon: 'refresh', raw: 'refreshBtn' },
     { id: 'switchAccount', label: 'Switch account', icon: 'switchAccount', raw: 'switchAccountBtn' },
-    { id: 'logout', label: 'Log out', icon: 'logout', raw: 'logoutBtn' },
+    { id: 'logout', label: 'Sign out', icon: 'logout', raw: 'logoutBtn' },
   ];
   return [g1.filter(Boolean), g2.filter(Boolean), g3].filter(g => g.length);
 }
@@ -157,7 +157,7 @@ function visibleNavGroups(){
 function visibleNavItems(){
   const hidePJ = isTeachingProfile();
   const byId = (id) => NAV_ITEMS.find(x => x.id === id);
-  const keep = (item) => item && !(hidePJ && HIDDEN_PJ_NAV_IDS.has(item.id));
+  const keep = (item) => item && !['sih','juzTracker'].includes(item.id) && !(hidePJ && HIDDEN_PJ_NAV_IDS.has(item.id));
   const out = [];
   if(isTeachingProfile()) out.push(MAKTAB_SUMMARY_NAV_ITEM);
   if(currentUser.role === 'admin') out.push(MAKTAB_SETTINGS_NAV_ITEM, ADMIN_NAV_ITEM);
@@ -193,7 +193,6 @@ function renderNavItemsInto(containerId, extraItemsHtml){
   el.innerHTML = grouped + (extraItemsHtml || '');
   el.querySelectorAll('[data-nav]').forEach(btn => {
     btn.addEventListener('click', () => {
-      closeAuthDropdown();
       showScreen(btn.dataset.nav);
     });
   });
@@ -215,30 +214,18 @@ function updateAuthBandZoom(){
 }
 function renderAuthBand(){
   document.querySelector('#authBand .user-name').textContent = currentUser.name || 'Hifzhelper';
+  const role=document.getElementById('hifzHeaderRole'),version=document.getElementById('hifzHeaderVersion');
+  if(role)role.textContent=({student:'Student',teacher:'Teacher',admin:'Admin'})[currentUser.role]||'';
+  if(version)version.textContent='HifzHelper'+(typeof appVersionFromScriptTag==='function'?' V'+(appVersionFromScriptTag()||''):'' );
   updateAuthBandZoom();
 }
 
-// 2026-08-03: #authDropdown is now position:fixed (css/nav.css) so it
-// stays visible regardless of scroll position, rather than opening in
-// its old document-flow spot near the top of the page. The band's real
-// height isn't a fixed number (it grows for a device's notch via
-// env(safe-area-inset-top)), so it's measured live here instead of
-// guessed at in CSS -- only needs to happen on open, since that's the
-// only moment the dropdown's position is actually visible/relevant.
-function toggleAuthDropdown(){
-  const dd = document.getElementById('authDropdown');
-  const toggle = document.getElementById('authBandToggle');
-  const opening = !dd.classList.contains('open');
-  if(opening){
-    const bandHeight = document.getElementById('authBand').getBoundingClientRect().height;
-    document.getElementById('appShell').style.setProperty('--auth-band-height', bandHeight + 'px');
-  }
-  dd.classList.toggle('open', opening);
-  toggle.classList.toggle('open', opening);
-}
-function closeAuthDropdown(){
-  document.getElementById('authDropdown').classList.remove('open');
-  document.getElementById('authBandToggle').classList.remove('open');
+// The existing role-aware menu now stays visible in Academy's second-banner layout.
+function updateHifzNavigation(screen){
+  const teaching=isTeachingProfile();
+  const selected=teaching&&['logDetail','studentSummary','maktabSetup','maktabCalendar'].includes(screen)?'maktabSummary':screen;
+  document.querySelectorAll('#authDropdownNav [data-nav]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.nav===selected)));
+  document.getElementById('homeDropdownBtn')?.setAttribute('aria-pressed',String(screen==='home'));
 }
 
 function setupAuthBandAndDropdown(){
@@ -247,10 +234,17 @@ function setupAuthBandAndDropdown(){
   // order that way. visibleNavGroups() places them; their ids and existing
   // listeners are unchanged.
   renderNavItemsInto('authDropdownNav');
-  document.getElementById('authBandToggle').innerHTML = iconHtml('menu');
-  document.getElementById('authBandToggle').addEventListener('click', toggleAuthDropdown);
+  const actions=document.getElementById('hifzPageActions');
+  if(actions){
+    const home=document.getElementById('homeDropdownBtn'),refresh=document.getElementById('refreshBtn'),logout=document.getElementById('logoutBtn');
+    home.setAttribute('aria-label','Home');refresh.setAttribute('aria-label','Refresh this page');
+    for(const button of [home,refresh,logout])button.className='hifz-page-action';
+    actions.prepend(home,refresh);actions.append(logout);
+  }
+  document.getElementById('hifzBrandHome')?.addEventListener('click',event=>{event.preventDefault();showScreen('home');});
+  if(typeof setupHifzHeaderDate==='function')setupHifzHeaderDate();
+  if(typeof ResizeObserver!=='undefined')new ResizeObserver(entries=>document.documentElement.style.setProperty('--auth-band-height',entries[0].target.getBoundingClientRect().height+'px')).observe(document.getElementById('authBand'));
   document.getElementById('homeDropdownBtn').addEventListener('click', () => {
-    closeAuthDropdown();
     // V3.74.1: back to Home for everyone. V3.71.0 pointed this at the
     // maktab summary while trying to change where the app LANDS — the
     // wrong target entirely, and it made the Home button not go home.
@@ -259,7 +253,6 @@ function setupAuthBandAndDropdown(){
     showScreen('home');
   });
   document.getElementById('timerDropdownBtn').addEventListener('click', () => {
-    closeAuthDropdown();
     openFloatingTimer();
   });
   document.getElementById('logoutBtn').addEventListener('click', () => {
@@ -275,7 +268,6 @@ function setupAuthBandAndDropdown(){
     location.reload();
   });
   document.getElementById('refreshBtn').addEventListener('click', () => {
-    closeAuthDropdown();
     location.reload();
   });
 }

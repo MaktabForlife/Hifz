@@ -15,6 +15,12 @@
   "env": {
     "production": {
       "name": "hifzhelper-api",
+      "vars": {
+        "PROFILE_AUTHORITY": "academy",
+        "ACADEMY_SYNC_TARGET": "production",
+        "ACADEMY_HANDOFF_ENABLED": "1",
+        "HIFZ_FRONTEND_ORIGIN": "https://hifz.maktab4life.org"
+      },
       "d1_databases": [
         {
           "binding": "DB",
@@ -29,7 +35,7 @@
         "PROFILE_AUTHORITY": "academy",
         "ACADEMY_SYNC_TARGET": "development",
         "ACADEMY_HANDOFF_ENABLED": "1",
-        "HIFZ_FRONTEND_ORIGIN": "https://hifz.maktab4life.org"
+        "HIFZ_FRONTEND_ORIGIN": "https://hifzhelper-dev.pages.dev"
       },
       "d1_databases": [
         {

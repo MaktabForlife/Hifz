@@ -1,4 +1,4 @@
-/* Hifzhelper build 5.0 | js/academy-handoff.js */
+/* Hifzhelper build 5.1 | js/academy-handoff.js */
 // A PKCE round trip binds Academy's one-use pass to the tab that requested it.
 // No PIN, Academy session token or credential hash crosses through the URL.
 async function handleAcademyHandoff(){
@@ -21,7 +21,7 @@ async function handleAcademyHandoff(){
    const verifier=base64(crypto.getRandomValues(new Uint8Array(32))),state=base64(crypto.getRandomValues(new Uint8Array(32)));
    const challenge=base64(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))));
    sessionStorage.setItem(key,JSON.stringify({state,verifier,createdAt:Date.now()}));
-   const target=new URL('/academy/hifz/',academyOrigin);target.search=new URLSearchParams({state,challenge,login:loginId}).toString();
+   const target=new URL('/academy/hifz/',academyOrigin);target.search=new URLSearchParams({state,challenge,login:loginId,...(ACADEMY_INTEGRATION.environment==='development'?{environment:'development'}:{})}).toString();
    location.replace(target.href);return true;
   }
   const params=new URLSearchParams(location.hash.slice(1));

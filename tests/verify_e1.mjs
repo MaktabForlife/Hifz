@@ -195,8 +195,8 @@ await handleSaveMaktabSabaq(post({ student_id: 'STU2', date: TODAY, sabaq_from: 
   w.eval('currentUser.role = "admin"');
   v = ids();
   check('nav admin: maktabSummary AND admin (admin counts as teacher)', v.includes('maktabSummary') && v.includes('admin'));
-  check('nav admin: Juz Tracker and Surahs in my Heart survive the hiding (V3.69.0)',
-    v.includes('juzTracker') && v.includes('sih'));
+  check('nav admin: V5.1 omits the colouring and puzzle activities',
+    !v.includes('juzTracker') && !v.includes('sih'));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

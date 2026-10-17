@@ -172,7 +172,7 @@ check('Hifz admin PIN reset remains available',(await handleResetPin(request({id
 check('ownership setting does not fabricate a cutover receipt',pending.db.prepare('SELECT COUNT(*) AS n FROM academy_identity_migrations').get().n===0);
 check('ownership setting leaves existing owner keys intact',profiles(pending.db).every(user=>user.id===user.login_id));
 const config=JSON.parse(readFileSync(new URL('../worker/wrangler.jsonc',import.meta.url),'utf8').replace(/^\s*\/\/.*$/gm,''));
-check('ownership is enabled only for development configuration',config.env.development.vars.PROFILE_AUTHORITY==='academy'&&!config.env.production.vars?.PROFILE_AUTHORITY);
+check('Academy ownership is enabled for both isolated environments',config.env.development.vars.PROFILE_AUTHORITY==='academy'&&config.env.production.vars?.PROFILE_AUTHORITY==='academy');
 
 // Drive the real boot function: aliases select URLs, permanent IDs select data.
 const app=readFileSync(new URL('../js/app.js',import.meta.url),'utf8');

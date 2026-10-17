@@ -1,5 +1,9 @@
 # Academy PIN and sign-in — V5.0
 
+## V5.1 production rollout
+
+`hifz.maktab4life.org` uses the existing production Worker and D1. `hifzhelper-dev.pages.dev` retains the separate development Worker and D1. The existing shared PIN and profile-signing keys are provisioned in production without rotation. Production identity migrations preserve existing journals and use verified immutable Academy account IDs. Academy automatically delivers profile/PIN changes to production; development can request a current-profile sign-in handoff through its separate fixed destination.
+
 Development frontend: `https://hifz.maktab4life.org/`.
 Development API: `https://hifzhelper-api-dev.hifzhelper-app.workers.dev`.
 Repository copy: `https://github.com/MaktabForlife/Hifz` (main/dev history preserved).
