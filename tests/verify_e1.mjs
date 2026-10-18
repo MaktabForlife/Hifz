@@ -1,3 +1,4 @@
+import {readSummarySource} from './helpers/journal-source.mjs';
 import { createDatabase, d1Database } from './helpers/database.mjs';
 import fs from 'fs';
 import { handleMaktabSummary, handleSaveMaktabSabaq, handleSaveMaktabDhor } from '../worker/src/maktabLog.js';
@@ -113,7 +114,7 @@ await handleSaveMaktabSabaq(post({ student_id: 'STU2', date: TODAY, sabaq_from: 
     function wireCustomDateDisplay(){ /* visual-only; real impl tested by V3.50.1's own harness */ }
     function iconHtml(name){ return '<svg data-icon="' + name + '"></svg>'; }
   `);
-  w.eval(read('js/maktabSummary.js'));
+  w.eval(readSummarySource());
   w.eval(read('js/maktabJournal.js'));
 
   // regression for the reported crash: an error-shaped response (no

@@ -1,4 +1,4 @@
-/* Hifzhelper build 5.1 | js/app.js */
+/* Hifzhelper build 5.2 | js/app.js */
 // ============================================================
 // Hifzhelper — app bootstrap and screen routing
 // ============================================================
@@ -42,6 +42,7 @@ const SCREENS_BUILT = { home: true, journal: true, logDetail: true, admin: true,
 const SCREEN_LABELS = { progress: 'Progress' };
 
 async function showScreen(id, param){
+  if(typeof maktabCloseQuickLog==='function')maktabCloseQuickLog();
   if(typeof updateHifzNavigation==='function')updateHifzNavigation(id);
   document.querySelectorAll('#appContent > .screen').forEach(s => s.classList.add('hidden'));
   // V4.2.15.8: the configured class Zoom action follows the authenticated

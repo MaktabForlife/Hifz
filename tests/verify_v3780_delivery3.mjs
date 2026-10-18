@@ -1,3 +1,4 @@
+import {readSummarySource} from './helpers/journal-source.mjs';
 // ============================================================
 // verify_v3780_delivery3.mjs — V3.78.0, delivery 3: groups, tajweed tags
 // as ID-referenced rows, the maktab timezone.
@@ -197,7 +198,7 @@ const tajweedSrc = read('js/tajweed.js');
 }
 
 // ---------- frontend: the summary's gaps + search ----------
-const summarySrc = read('js/maktabSummary.js');
+const summarySrc = readSummarySource();
 function summaryDom(students) {
   const dom = new JSDOM(`<!DOCTYPE html><body>
     <input type="date" id="maktabSummaryDatePicker">
@@ -281,7 +282,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
 check('cards: all three send tajweed_tag_ids, none sends the word field',
   ['js/sabaqPage.js', 'js/sabaqDhorPage.js', 'js/dhorPage.js'].every(f => /tajweed_tag_ids:/.test(read(f)) && !/tajweed_tags:/.test(read(f))));
 check('worker: all four log modules whitelist tajweed_tag_ids, none the old field',
-  ['worker/src/sabaqLog.js', 'worker/src/sabaqDhorLog.js', 'worker/src/dhorLog.js', 'worker/src/maktabLog.js'].every(f => /tajweed_tag_ids/.test(read(f)) && !/'tajweed_tags'/.test(read(f))));
+  /tajweed_tag_ids/.test(read('shared/journalSchema.js')) && ['worker/src/sabaqLog.js', 'worker/src/sabaqDhorLog.js', 'worker/src/dhorLog.js', 'worker/src/maktabLog.js'].every(f => /JOURNAL_LOG_SCHEMA/.test(read(f)) && !/'tajweed_tags'/.test(read(f))));
 check('boot: the vocabulary and the timezone load at login for every role',
   /MAKTAB_TIMEZONE = profile\.maktab_timezone \|\| null;/.test(read('js/app.js')) && /await loadTajweedVocabulary\(\);/.test(read('js/app.js')));
 check('settings screen: timezone select + both list managers exist',

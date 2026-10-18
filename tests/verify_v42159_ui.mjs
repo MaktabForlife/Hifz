@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {readSummarySource} from './helpers/journal-source.mjs';
 // V4.2.15.11 — transparent Maktab Log action rail + unified selector polish +
 // Attendance Save label + Student Summary unified Log Quick Action.
 import fs from 'fs';
@@ -13,7 +14,7 @@ const check = (label, cond) => { if(cond) pass++; else { fail++; console.log('FA
 const html = read('index.html');
 const sw = read('js/sw.js');
 const day = read('js/maktabDay.js');
-const summary = read('js/maktabSummary.js');
+const summary = readSummarySource();
 const journalCss = read('css/journal-table.css');
 const haidhCss = read('css/haidh.css');
 

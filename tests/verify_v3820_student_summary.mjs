@@ -1,3 +1,4 @@
+import {readSummarySource} from './helpers/journal-source.mjs';
 // ============================================================
 // verify_v3820_student_summary.mjs — carried forward through V4.2.15.5.
 //
@@ -19,7 +20,7 @@ const check = (l, c, x = '') => { if (c) pass++; else { fail++; console.log('FAI
 const html = read('index.html');
 const daySrc = read('js/maktabDay.js');
 const detailSrc = read('js/logDetailScreen.js');
-const summarySrc = read('js/maktabSummary.js');
+const summarySrc = readSummarySource();
 const appSrc = read('js/app.js');
 const detailCss = read('css/detail-pages.css');
 

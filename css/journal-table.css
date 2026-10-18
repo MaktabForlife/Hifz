@@ -1,4 +1,4 @@
-/* Hifzhelper build 4.2.15.25 | css/journal-table.css */
+/* Hifzhelper build 5.2 | css/journal-table.css */
 /* ============================================================
    Hifzhelper — journal landing table
    2026-08-05, confirmed in chat -- complete rebuild alongside js/
@@ -107,6 +107,17 @@
   vertical-align: top;
 }
 .journal-table tr:last-child td { border-bottom: none; }
+
+/* Personal date cells expose the same explicit Quick Log action as Maktab. */
+.personal-journal-log { display:flex; align-items:center; justify-content:center; gap:3px; padding:4px 6px; margin-top:5px; border:1px solid var(--color-table-border); border-radius:var(--radius-sm); font-size:11px; background:var(--color-surface); }
+.personal-journal-log svg { width:14px; height:14px; }
+.journal-quick-mode { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:8px 0; font-size:13px; }
+.journal-quick-mode button { padding:6px 10px; border:1px solid var(--color-table-border); border-radius:var(--radius-sm); }
+.quick-existing-entry { display:flex; justify-content:space-between; align-items:center; gap:8px; width:100%; padding:7px 9px; margin-top:4px; border:1px solid var(--color-table-border); border-radius:var(--radius-sm); text-align:left; font-size:12px; }
+.quick-existing-entry small { font-size:10px; white-space:nowrap; }
+.quick-readonly { opacity:.8; }
+.journal-quick-dhor-range { display:grid; grid-template-columns:36px minmax(0,1fr) minmax(0,1fr); gap:6px; align-items:center; }
+.journal-quick-dhor-range select { width:100%; min-width:0; }
 
 /* Confirmed in chat: cells are plain text, not selectable/editable
    directly -- a plain click (js/journal.js's wireClick, same for touch

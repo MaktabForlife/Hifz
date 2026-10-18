@@ -1,3 +1,27 @@
+## Shared journal quick editor — V5.2 (2026-10-18)
+
+All 87 harnesses pass: 2,068 checks, zero failures. The development Worker
+bundle also passes a local dry-run build; no Worker is deployed.
+
+Automated coverage exercises Add and Edit for all three activities in both journal
+contexts, matching record IDs, confirmation, date changes, saved Dhor references,
+multi-entry selection, unchanged edits, preservation of hidden fields, Sabaq count
+recalculation and progress, teacher-entry read-only state, session changes during
+reads, cancellation before dispatch, and Detail routing. Existing duplicate,
+failure/retry and replacement-window checks continue to run against the extracted
+shared component. Preview-host tests verify development API selection even when
+storage is disabled and preserve the two production hosts.
+
+Local Chrome checks with in-memory sample journals verify Personal Sabaq, Sabaq Dhor
+and Dhor edits, Maktab Sabaq edits, refreshed summaries, full Detail access and a
+390px phone layout. These browser checks make no requests to Academy or either
+live Hifz database. No real profiles, PINs or journal records are changed.
+
+Development acceptance: sign in directly at `https://dev.maktab-hifz.pages.dev/`,
+use Log to add each activity, select an already logged entry to edit it, change
+the date and re-confirm, and open Detail to check notes and timing remain intact.
+Teacher-confirmed records in a student's personal journal must remain read-only.
+
 ## Maktab row order and student heading — V4.2.15.25
 
 All 78 harnesses passed: 1,680 checks, zero failures. Updated the existing

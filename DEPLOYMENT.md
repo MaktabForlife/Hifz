@@ -1,8 +1,24 @@
-# Hifz V5.1 deployment
+# Hifz deployment
 
 The branded website is published only from `MaktabForlife/Hifz`. The original
 `Hifzhelper-app/Hifzhelper` repository remains unbranded; do not publish branded
 releases to either of its branches.
+
+## V5.2 development only
+
+The approved destination is `MaktabForlife/Hifz:dev`, whose branded preview is
+`https://dev.maktab-hifz.pages.dev/`. The browser selects the development API on
+this alias and unique `*.maktab-hifz.pages.dev` preview hosts. The main Pages host
+and custom production domain continue to select the production API.
+
+The shared editor works with the existing V5.1 endpoints. Worker source now imports
+one content field contract, with identical fields and storage behavior; a Worker
+deployment is not needed to test the frontend. No migrations, D1 writes or Worker
+deployments are included in this dev-branch publication. Production stays V5.1.
+
+Use direct development PIN sign-in for preview tests. Academy's development handoff
+has a fixed return origin at the original `hifzhelper-dev.pages.dev`; opening that
+handoff does not keep the user on this branded Pages preview.
 
 ## Production website
 

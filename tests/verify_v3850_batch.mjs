@@ -1,3 +1,4 @@
+import {readSummarySource} from './helpers/journal-source.mjs';
 // ============================================================
 // verify_v3850_batch.mjs — V3.85.0, items 2–4 of the user's batch
 // (item 1, the standalone summary page, lives in the rewritten
@@ -257,7 +258,7 @@ const apiSrc = read('js/api.js');
 check('v3971: the API base is an auto-select — override first, dev by hostname, production the default',
   /const API_BASE = \(\(\) => \{/.test(apiSrc)
   && /localStorage\.getItem\('hh_api_base'\)/.test(apiSrc)
-  && /h\.includes\('-dev'\) \|\| h === 'localhost'/.test(apiSrc)
+  && /h\.includes\('-dev'\)/.test(apiSrc) && /h === 'localhost'/.test(apiSrc)
   && /return 'https:\/\/hifzhelper-api-dev\.hifzhelper-app\.workers\.dev';/.test(apiSrc)
   && apiSrc.indexOf("hifzhelper-api-dev") < apiSrc.indexOf("return 'https://hifzhelper-api.hifzhelper-app.workers.dev';"));
 
@@ -366,8 +367,8 @@ check('v411: the menu\'s HOME button still goes HOME — the V3.74.1 lesson kept
   /showScreen\('home'\);/.test(read('js/auth.js')));
 
 check('v420/v428: the maktab summary\'s student names are light-blue pills; V4.2.8 makes every pill the same cell width and ellipsises long names',
-  /nameSpan\.className = 'maktab-name-pill';/.test(read('js/maktabSummary.js'))
-  && /nameSpan\.title = stu\.name;/.test(read('js/maktabSummary.js'))
+  /nameSpan\.className = 'maktab-name-pill';/.test(readSummarySource())
+  && /nameSpan\.title = stu\.name;/.test(readSummarySource())
   && /\.maktab-student-name \.maktab-name-pill \{\n  display: block;\n  width: 100%;[\s\S]*text-overflow: ellipsis;[\s\S]*background: var\(--color-accent-soft/.test(read('css/journal-table.css')));
 check('v420/v421: the admin table has the summary\'s two-part shape — a header table over a white scrolling body table',
   /<table class="admin-table admin-table-head">/.test(read('js/adminPage.js'))
@@ -378,7 +379,7 @@ check('v420/v421: the admin table has the summary\'s two-part shape — a header
 check('v422: the maktab summary becomes one CARD PER STUDENT on mobile, in CSS over the existing rows — so every tap target survives',
   /@media \(max-width: 767px\) \{\n  \.maktab-summary-headers \{ display: none; \}/.test(read('css/journal-table.css'))
   && /\.maktab-summary-table \.journal-cell::before \{\n    content: attr\(data-label\);/.test(read('css/journal-table.css'))
-  && /td\.setAttribute\('data-label', CELL_LABEL\[type\]\);/.test(read('js/maktabSummary.js')));
+  && /td\.setAttribute\('data-label', CELL_LABEL\[type\]\);/.test(readSummarySource()));
 check('v422: the summary sheds its grey panel — SCOPED to that screen, the app-wide V3.44 rule untouched',
   /#screen-maktabSummary \{ background: none;/.test(read('css/detail-pages.css'))
   && /\.screen \{\n  background: var\(--surface-track\);/.test(read('css/base.css')));

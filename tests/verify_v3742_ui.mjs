@@ -1,3 +1,4 @@
+import {readSummarySource} from './helpers/journal-source.mjs';
 // ============================================================
 // verify_v3742_ui.mjs — the V3.74.2 batch (items 1-11).
 //
@@ -21,7 +22,7 @@ let pass = 0, fail = 0;
 const check = (l, c, x = '') => { if (c) pass++; else { fail++; console.log('FAIL:', l, x); } };
 
 const auth = read('js/auth.js');
-const summary = read('js/maktabSummary.js');
+const summary = readSummarySource();
 const sd = read('js/sabaqDhorPage.js');
 const admin = read('js/adminPage.js');
 const settings = read('js/maktabSettings.js');

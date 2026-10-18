@@ -1,3 +1,4 @@
+import {readSummarySource} from './helpers/journal-source.mjs';
 // ============================================================
 // verify_v3750_phase1.mjs — the V3.75.0 Phase 1 batch (items 1, 2, 3, 4,
 // 6, 10, 11 of the 2026-08-26 list of eleven).
@@ -26,7 +27,7 @@ const base = read('css/base.css');
 const dp = read('css/detail-pages.css');
 const adminCss = read('css/admin.css');
 const settingsCss = read('css/settings.css');
-const summary = read('js/maktabSummary.js');
+const summary = readSummarySource();
 const day = read('js/maktabDay.js');
 const sd = read('js/sabaqDhorPage.js');
 const dhor = read('js/dhorPage.js');

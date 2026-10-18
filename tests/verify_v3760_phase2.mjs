@@ -1,3 +1,4 @@
+import {readSummarySource} from './helpers/journal-source.mjs';
 // ============================================================
 // verify_v3760_phase2.mjs — V3.76.0, Phase 2: the maktab haidh calendar.
 //
@@ -27,7 +28,7 @@ let pass = 0, fail = 0;
 const check = (l, c, x = '') => { if (c) pass++; else { fail++; console.log('FAIL:', l, x); } };
 
 const calSrc = read('js/haidhDetailScreen.js');
-const summarySrc = read('js/maktabSummary.js');
+const summarySrc = readSummarySource();
 const daySrc = read('js/maktabDay.js');
 const appSrc = read('js/app.js');
 const apiSrc = read('js/api.js');

@@ -1,3 +1,4 @@
+import {readSummarySource} from './helpers/journal-source.mjs';
 // ============================================================
 // verify_v3800_attendance_page.mjs — V3.80.0: the attendance page.
 //
@@ -215,7 +216,7 @@ const BASE = { student_id: 'STU1', from: '2026-08-01', to: '2026-08-28', source:
 
 // ---------- rewiring assertions ----------
 check('summary: the icon is the attendance icon on EVERY student and opens Quick Attendance',
-  /btn\.innerHTML = iconHtml\('attendance'\);/.test(read('js/maktabSummary.js')) && /maktabOpenQuickAttendance\(stu, date\);/.test(read('js/maktabSummary.js')));
+  /btn\.innerHTML = iconHtml\('attendance'\);/.test(readSummarySource()) && /maktabOpenQuickAttendance\(stu, date\);/.test(readSummarySource()));
 check('nav: the item is Attendance for every student; trackHaidh no longer gates the nav',
   /const ATTENDANCE_NAV_ITEM = \{ id: 'attendancePage', label: 'Attendance', icon: 'attendance' \};/.test(read('js/auth.js')));
 check('app: the screen key renamed whole (no haidhDetail route survives)',

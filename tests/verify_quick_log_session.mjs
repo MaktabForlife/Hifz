@@ -1,3 +1,4 @@
+import {readSummarySource} from './helpers/journal-source.mjs';
 import { JSDOM } from 'jsdom';
 import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
@@ -17,7 +18,7 @@ function journalCellShorthand(type, rows){ return rows.map(r => r.id).join(',');
 function apiGetMaktabSabaq(){ return Promise.resolve([]); }
 function loadMaktabSettings(){ return Promise.resolve({mushaf:'13line'}); }
 `);
-w.eval(read('js/maktabSummary.js') + '\nwindow.testState = () => maktabQuickLogState;');
+w.eval(readSummarySource() + '\nwindow.testState = () => maktabQuickLogState;');
 let posts = [], rows = {sabaq:[],sabaq_dhor:[],dhor:[]}, refreshes = 0;
 let postError = false, readError = false, duplicate = false, pending = null;
 w.maktabQuickPlanningDefaults = async () => ({sabaqDefaults:{from:{surah:2,ayah:6},to:{surah:2,ayah:6}},sabaqDhorRows:[]});

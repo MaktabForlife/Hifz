@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {readSummarySource} from './helpers/journal-source.mjs';
 // V4.2.14.2 compatibility — ordering + Student Summary quick actions; cache carried through later overlays.
 import fs from 'fs';
 import path from 'path';
@@ -12,7 +13,7 @@ const check = (label, cond) => { if(cond) pass++; else { fail++; console.log('FA
 
 const html = read('index.html');
 const day = read('js/maktabDay.js');
-const summary = read('js/maktabSummary.js');
+const summary = readSummarySource();
 const attendance = read('js/maktabAttendancePage.js');
 const css = read('css/detail-pages.css');
 const sw = read('js/sw.js');

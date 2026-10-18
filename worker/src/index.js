@@ -1,4 +1,4 @@
-/* Hifzhelper build 5.1 | worker/src/index.js */
+/* Hifzhelper build 5.2 | worker/src/index.js */
 import { json, error } from './utils.js';
 import {headerDate} from './header-date.js';
 import {handleAcademyHandoff,handleAcademySignin} from './academy-handoff.js';
@@ -52,7 +52,7 @@ export default {
 
     try {
       if(path==='/api/header-date')return request.method==='GET'?headerDate(request):error('Use GET.',405);
-      if(path==='/api/health'&&request.method==='GET')return json({success:true,service:'hifzhelper',version:'5.1',environment:env.ACADEMY_SYNC_TARGET||'production'});
+      if(path==='/api/health'&&request.method==='GET')return json({success:true,service:'hifzhelper',version:'5.2',environment:env.ACADEMY_SYNC_TARGET||'production'});
       if (path === '/internal/academy/profile-sync') {
         return respond(await handleAcademyProfileSync(request, env));
       }

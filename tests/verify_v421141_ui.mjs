@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {readSummarySource} from './helpers/journal-source.mjs';
 // V4.2.14.1 — Quick Log mobile alignment + Quick Attendance actions.
 import fs from 'fs';
 import path from 'path';
@@ -9,7 +10,7 @@ const read = p => fs.readFileSync(path.join(ROOT, p), 'utf8');
 let pass = 0, fail = 0;
 const check = (label, cond) => { if(cond) pass++; else { fail++; console.log('FAIL:', label); } };
 
-const summary = read('js/maktabSummary.js');
+const summary = readSummarySource();
 const day = read('js/maktabDay.js');
 const journalCss = read('css/journal-table.css');
 const detailCss = read('css/detail-pages.css');

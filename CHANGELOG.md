@@ -5,6 +5,34 @@ future delivery only needs those specific files re-uploaded — not the whole
 repo. See `SETUP.md` for initial setup, `SCHEMA.md`/`CONVENTIONS.md` for the
 standing reference docs (those aren't repeated here unless they change).
 
+## V5.2 — Shared Personal and Maktab Quick Log (2026-10-18)
+
+Personal Journal has a Log action on each date and opens the shared quick editor
+when an owned activity is tapped. Both journals use one Add/Edit popup for Sabaq,
+Sabaq Dhor and Dhor; saved entries can be selected individually. Detail remains
+available for notes, mistakes and timing. Teacher-recorded entries remain read-only
+in the merged personal journal.
+
+The editor captures journal ownership and the current session before asynchronous
+work, uses the correct personal or Maktab endpoints and progression settings, and
+requires fresh confirmation after changing a range or date. Edits send only changed
+visible fields, preserving notes, privacy, feedback, counts, mistakes and timers.
+Changing the Sabaq range recalculates its line/page counts; editing an older entry
+does not move current progress. Dhor edits preserve the saved reference and exact
+range, including ranges spanning Juz boundaries.
+
+One shared content schema supplies the editor and both Worker field lists. Existing
+tables and API fields are unchanged: no migration, profile or PIN changes. Branded
+Pages previews select the development API, including with browser storage disabled.
+Publish this release to `MaktabForlife/Hifz:dev` only. Production and the original
+unbranded Hifzhelper repository remain unchanged. See DEPLOYMENT.md and TESTING.md.
+
+Files: js/journalQuickContext.js, js/journalQuickEditor.js, shared/journalSchema.js,
+js/journal.js, js/maktabSummary.js, js/app.js, js/api.js, css/journal-table.css,
+index.html, js/sw.js, worker/src/{sabaqLog,sabaqDhorLog,dhorLog,maktabLog,index}.js,
+tests/helpers/journal-source.mjs, new shared-editor and preview-routing tests,
+updated historical extraction checks, CHANGELOG.md, TODO.md, DEPLOYMENT.md, TESTING.md.
+
 ## V5.1 — Academy banners and Hifz navigation (2026-10-17)
 
 The authenticated app uses Academy's two top banners: local Academy branding,

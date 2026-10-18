@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {readSummarySource} from './helpers/journal-source.mjs';
 // V4.2.12 — Maktab Summary Quick Log trial.
 // Static/structural pins only so this runs in the bare checkout without jsdom.
 import fs from 'fs';
@@ -10,7 +11,7 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 let pass = 0, fail = 0;
 const check = (label, cond, extra='') => { if(cond) pass++; else { fail++; console.log('FAIL:', label, extra); } };
 
-const js = read('js/maktabSummary.js');
+const js = readSummarySource();
 const css = read('css/journal-table.css');
 const html = read('index.html');
 const sw = read('js/sw.js');
@@ -21,16 +22,16 @@ check('activity cells are display-only and the dedicated Log action opens Quick 
 check('the +N entry peek remains a separate stop-propagating target',
   /peekBtn\.addEventListener\('click',[\s\S]{0,180}e\.stopPropagation\(\)/.test(js));
 check('full detail cards remain reachable from the Quick Log sheet',
-  /id="maktabQuickLogDetails"/.test(js) && /maktabQuickLogDetails[\s\S]{0,500}openMaktabDay/.test(js));
+  /id="maktabQuickLogDetails"/.test(js) && /snapshot\.context\.detail\(snapshot\.type,snapshot\.date,snapshot\.editing\)/.test(js));
 
 check('Sabaq and Sabaq Dhor expose From/To range controls with a Tajweed picker',
   /maktabQuickVerseField\('from', 'From'\)/.test(js)
   && /maktabQuickVerseField\('to', 'To'\)/.test(js)
   && /id="maktabQuickTajweed"/.test(js));
 check('Sabaq Quick Log posts the existing minimal maktab fields',
-  /path = '\/maktab\/sabaq';[\s\S]{0,280}sabaq_from:[\s\S]{0,120}sabaq_to:/.test(js));
+  /sabaq: Object\.freeze\(\{label:'Sabaq',path:'sabaq'/.test(js));
 check('Sabaq Dhor Quick Log posts the existing minimal maktab fields',
-  /path = '\/maktab\/sabaq-dhor';[\s\S]{0,320}from_surah:[\s\S]{0,180}to_ayah:/.test(js));
+  /sabaqDhor: Object\.freeze\(\{label:'Sabaq Dhor',path:'sabaq-dhor'/.test(js));
 
 check('Dhor has Juz plus Quarter / Half / Juz controls',
   /id="mql_dhor_juz"/.test(js)
@@ -38,8 +39,8 @@ check('Dhor has Juz plus Quarter / Half / Juz controls',
   && /data-unit="half"[^>]*>Half</.test(js)
   && /data-unit="full"[^>]*>Juz</.test(js));
 check('Dhor range uses the shared segment arithmetic and existing maktab endpoint',
-  /segmentRangeForUnitIndex\(juz, position, state\.ref/.test(js)
-  && /path = '\/maktab\/dhor'/.test(js));
+  /segmentRangeForUnitIndex\(juz,[^\n]+state\.ref/.test(js)
+  && /dhor: Object\.freeze\(\{label:'Dhor',path:'dhor'/.test(js));
 
 check('one confirmation checkbox gates one Save action',
   /id="maktabQuickLogConfirm"/.test(js)
@@ -52,11 +53,11 @@ check('duplicate protection is preserved with the established abortable force fl
   && /confirm\(`\$\{duplicateLabel\} has already been saved/.test(js)
   && /force: true/.test(js));
 check('successful Quick Log refreshes the caller or current summary instead of forcing a screen change',
-  /const afterSave = state\.afterSave;[\s\S]{0,180}if\(typeof afterSave === 'function'\) await afterSave\(\);[\s\S]{0,120}else await renderMaktabSummaryScreen\(\)/.test(js));
+  /if\(typeof state\.afterSave==='function'\)await state\.afterSave\(\);[\s\S]{0,120}else if\(context\.mode==='maktab'\)await renderMaktabSummaryScreen\(\)/.test(js));
 check('Sabaq keeps its best-effort maktab position metadata sync after a quick save',
   /maktabQuickSyncSabaqPosition/.test(js)
-  && /apiGetMaktabPosition\(studentId\)/.test(js)
-  && /apiSaveMaktabPosition\(studentId/.test(js));
+  && /apiGetMaktabPosition\(owner\.id\)/.test(js)
+  && /apiSaveMaktabPosition\(owner\.id/.test(js));
 
 check('Quick Log has compact responsive sheet styling',
   /\.maktab-quick-log-card \{ max-width: 520px; \}/.test(css)

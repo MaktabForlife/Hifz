@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {readSummarySource} from './helpers/journal-source.mjs';
 // V4.2.15.11 — Sabaq Dhor Quick Action fixed RHS checkbox track.
 import fs from 'fs';
 import path from 'path';
@@ -13,7 +14,7 @@ const html = read('index.html');
 const css = read('css/journal-table.css');
 const sw = read('js/sw.js');
 const components = read('css/components.css');
-const summary = read('js/maktabSummary.js');
+const summary = readSummarySource();
 
 // Release identity and last-edit headers are checked centrally by verify_build_stamp.mjs.
 

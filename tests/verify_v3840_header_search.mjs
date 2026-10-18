@@ -1,3 +1,4 @@
+import {readSummarySource} from './helpers/journal-source.mjs';
 // ============================================================
 // verify_v3840_header_search.mjs — V3.84.0: the maktab summary search
 // moves INTO the green Student header cell (user, 2026-08-28: no
@@ -19,7 +20,7 @@ let pass = 0, fail = 0;
 const check = (l, c, x = '') => { if (c) pass++; else { fail++; console.log('FAIL:', l, x); } };
 
 const html = read('index.html');
-const src = read('js/maktabSummary.js');
+const src = readSummarySource();
 
 // ---------- markup ----------
 check('html: the full-width .maktab-search-row is GONE', !/maktab-search-row/.test(html));

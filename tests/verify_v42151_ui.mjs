@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {readSummarySource} from './helpers/journal-source.mjs';
 // V4.2.15.1 — Attendance UI sorting/navigation + Student Management Haidh setup.
 // Dependency-free structural + behavioural regression.
 import fs from 'fs';
@@ -13,7 +14,7 @@ const check = (label, cond) => { if(cond) pass++; else { fail++; console.log('FA
 
 const html = read('index.html');
 const attendance = read('js/maktabAttendancePage.js');
-const summary = read('js/maktabSummary.js');
+const summary = readSummarySource();
 const detailCss = read('css/detail-pages.css');
 const journalCss = read('css/journal-table.css');
 const settingsCss = read('css/settings.css');

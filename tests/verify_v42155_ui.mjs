@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {readSummarySource} from './helpers/journal-source.mjs';
 // V4.2.15.5 — multi-entry Daily Report + current-month Student Summary
 // + Calendar gap events/term cards + mobile Quick Action refinements.
 import fs from 'fs';
@@ -20,7 +21,7 @@ const day = read('js/maktabDay.js');
 const detailCss = read('css/detail-pages.css');
 const cal = read('js/maktabCalendarPage.js');
 const settingsCss = read('css/settings.css');
-const summary = read('js/maktabSummary.js');
+const summary = readSummarySource();
 const journalCss = read('css/journal-table.css');
 const haidhCss = read('css/haidh.css');
 

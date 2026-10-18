@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {readSummarySource} from './helpers/journal-source.mjs';
 // V4.2.12.1 — Quick Log compact-card refinement + Maktab Summary ordering.
 import fs from 'fs';
 import path from 'path';
@@ -10,7 +11,7 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 let pass = 0, fail = 0;
 const check = (label, cond, extra='') => { if(cond) pass++; else { fail++; console.log('FAIL:', label, extra); } };
 
-const js = read('js/maktabSummary.js');
+const js = readSummarySource();
 const css = read('css/journal-table.css');
 const html = read('index.html');
 const sw = read('js/sw.js');

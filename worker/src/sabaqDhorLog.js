@@ -1,8 +1,10 @@
+/* Hifzhelper build 5.2 | worker/src/sabaqDhorLog.js */
+import { JOURNAL_LOG_SCHEMA } from '../../shared/journalSchema.js';
 import { insertLog, updateLog, deleteLog, getLogs, getMergedLogs, linkPlanIfProvided } from './logHelpers.js';
 import { isValidDate, isTeacherOrAbove } from './utils.js';
 
 const TABLE = 'sabaq_dhor_log';
-const FIELDS = ['zone', 'tajweed_tag_ids', 'mistakes', 'from_surah', 'from_ayah', 'to_surah', 'to_ayah'];
+const FIELDS = JOURNAL_LOG_SCHEMA.sabaqDhor.fields;
 // V3.51.0 (confirmed in chat): 'date' is editable on update only -- a
 // separate whitelist, NOT added to FIELDS, which insertLog consumes
 // positionally (the V3.44.1 reflections.js lesson).
@@ -38,10 +40,7 @@ export async function handleSaveSabaqDhor(request, env, auth) {
   if (err) return { error: err, status: 400 };
 
   const studentId = isTeacherOrAbove(auth) && body.student_id ? body.student_id : auth.id;
-  const values = [
-    body.zone ?? null, body.tajweed_tag_ids ?? null, body.mistakes ?? null,
-    body.from_surah ?? null, body.from_ayah ?? null, body.to_surah ?? null, body.to_ayah ?? null
-  ];
+  const values = FIELDS.map(field => body[field] ?? null);
   const result = await insertLog(env, TABLE, studentId, body.date, auth.id, FIELDS, values, body.force);
 
   // V3.45.15: guarded on result.id -- see sabaqLog.js's own identical

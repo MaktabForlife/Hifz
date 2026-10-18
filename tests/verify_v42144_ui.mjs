@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {readSummarySource} from './helpers/journal-source.mjs';
 // V4.2.14.4 — selectable dates on Quick Log and Quick Attendance.
 import fs from 'fs';
 import path from 'path';
@@ -9,7 +10,7 @@ const read = p => fs.readFileSync(path.join(ROOT, p), 'utf8');
 let pass = 0, fail = 0;
 const check = (label, cond) => { if(cond) pass++; else { fail++; console.log('FAIL:', label); } };
 
-const summary = read('js/maktabSummary.js');
+const summary = readSummarySource();
 const day = read('js/maktabDay.js');
 const css = read('css/journal-table.css');
 const html = read('index.html');
@@ -23,8 +24,8 @@ check('Quick Log renders a real selectable date input',
 
 check('Quick Log date change updates the state date and reloads exact-day Summary data',
   /async function maktabQuickChangeDate\(nextDate\)[\s\S]{0,420}state\.date = nextDate/.test(summary)
-  && /apiMaktabSummary\(nextDate\)/.test(summary)
-  && /maktabQuickEntryMapForDate\(data, state\.student\.id\)/.test(summary));
+  && /state\.context\.readDate\(nextDate\)/.test(summary)
+  && /maktabQuickEntryMapForDate\(await apiMaktabSummary\(date\),owner\.id\)/.test(summary));
 
 check('Quick Log never leaves old-date existing rows visible while a date reload is in flight',
   /state\.entriesByType = \{ sabaq: \[\], sabaqDhor: \[\], dhor: \[\] \};[\s\S]{0,120}maktabQuickRenderBody\(\)/.test(summary));
@@ -35,10 +36,8 @@ check('Quick Log date change requires confirmation again and has stale-request p
   && /token !== state\.dateLoadToken/.test(summary));
 
 check('Quick Log Save and Detail continue to use the currently selected state date',
-  /payload = \{ student_id: state\.student\.id, date: state\.date, sabaq_from:/.test(summary)
-  && /payload = \{ student_id: state\.student\.id, date: state\.date, from_surah:/.test(summary)
-  && /payload = \{ student_id: state\.student\.id, date: state\.date, segment_from:/.test(summary)
-  && /openMaktabDay\([\s\S]{0,260}snapshot\.date, snapshot\.type\)/.test(summary));
+  /let payload=\{date:state\.date\}/.test(summary)
+  && /snapshot\.context\.detail\(snapshot\.type,snapshot\.date,snapshot\.editing\)/.test(summary));
 
 check('V4.2.15.2 Attendance quick action carries the selected Summary date into the reused calendar popup',
   /const selectedDate = date \|\| maktabTodayISO\(\)/.test(day)

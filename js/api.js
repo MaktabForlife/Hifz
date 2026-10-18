@@ -1,4 +1,4 @@
-/* Hifzhelper build 5.1 | js/api.js */
+/* Hifzhelper build 5.2 | js/api.js */
 // ============================================================
 // Hifzhelper — API client (V3)
 // Plain classic script (not an ES module) for the same file:// portability
@@ -16,7 +16,7 @@ const API_BASE = (() => {
   } catch (e) { /* Host-based routing still works without browser storage. */ }
   try {
     const h = location.hostname.toLowerCase();
-    if (h.includes('-dev') || h === 'localhost' || h === '127.0.0.1') {
+    if (h.includes('-dev') || h.endsWith('.maktab-hifz.pages.dev') || h === 'localhost' || h === '127.0.0.1') {
       return 'https://hifzhelper-api-dev.hifzhelper-app.workers.dev';
     }
   } catch (e) { /* No location in standalone harnesses/file-based tools. */ }

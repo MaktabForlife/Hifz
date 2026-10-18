@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {readSummarySource} from './helpers/journal-source.mjs';
 // V4.2.14 compatibility audit — V4.2.13 probable propagation is intentionally
 // retired in favour of one confirmed/predicted/activity timeline.
 import fs from 'fs';
@@ -65,7 +66,7 @@ check('a real log today resets no-log warning streak', streakLoggedToday.noLogSt
 // ---- active UI contract ----
 const attJs=read('js/haidhDetailScreen.js');
 const regJs=read('js/maktabAttendancePage.js');
-const summaryJs=read('js/maktabSummary.js');
+const summaryJs=readSummarySource();
 check('individual Attendance UI no longer carries probable Haidh', !/probable[-_ ]haidh/i.test(attJs));
 check('calendar consumes explicit activity and keeps predictions distinct',
   /row\.status === 'activity'/.test(attJs) && /haidh-cal-day-activity/.test(attJs) && /status === 'predicted-haidh'/.test(attJs));

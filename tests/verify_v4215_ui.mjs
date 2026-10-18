@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {readSummarySource} from './helpers/journal-source.mjs';
 // V4.2.15 — Maktab Summary numbering + Attendance navigation + Quick Log prepopulation.
 // Dependency-free structural pins.
 import fs from 'fs';
@@ -11,7 +12,7 @@ let pass = 0, fail = 0;
 const check = (label, cond) => { if(cond) pass++; else { fail++; console.log('FAIL:', label); } };
 
 const html = read('index.html');
-const summary = read('js/maktabSummary.js');
+const summary = readSummarySource();
 const day = read('js/maktabDay.js');
 const css = read('css/journal-table.css');
 const haidh = read('js/haidhDetailScreen.js');
@@ -28,13 +29,13 @@ check('Maktab Summary top row has an Attendance button that opens the Attendance
   && /maktabSummaryAttendanceBtn\.addEventListener\('click', \(\) => showScreen\('maktabAttendance'\)\)/.test(summary));
 
 check('Sabaq Quick Log reuses Sabaq-history frontier/default prepopulation',
-  /apiGetMaktabSabaq\(studentId\)/.test(summary)
-  && /computeActualSabaqFrontier\(sabaqRows, ref\)/.test(summary)
-  && /nextSabaqDefaults\(frontier, ref, dhorRows\.length > 0\)/.test(summary)
+  /context\.client\('sabaq'\)\.get\(\)/.test(summary)
+  && /computeActualSabaqFrontier\(sabaqRows,ref\)/.test(summary)
+  && /nextSabaqDefaults\(frontier,ref,\(dhorHistory\|\|\[\]\)\.length>0\)/.test(summary)
   && /sabaq: \{ from:maktabQuickCloneVerse\(sabaqDefaults\.from\), to:maktabQuickCloneVerse\(sabaqDefaults\.to\) \}/.test(summary));
 
 check('Sabaq Dhor Quick Log reuses quarter-derived rows plus manual From/To',
-  /computeSabaqDhorRows\(decoratedPosition, ref, 'quarters', baselineSelection\)/.test(summary)
+  /computeSabaqDhorRows\(decoratedPosition,ref,'quarters',baselineSelection\)/.test(summary)
   && /maktab-quick-sd-row-pill/.test(summary)
   && /class="mql-sd-row-cb"/.test(summary)
   && /maktabQuickVerseField\('from', 'From'\)/.test(summary)
@@ -42,7 +43,7 @@ check('Sabaq Dhor Quick Log reuses quarter-derived rows plus manual From/To',
 
 check('Quick Log Detail uses the detail icon+label beside the date and opens the full card',
   /maktab-quick-date-row[\s\S]{0,500}id="maktabQuickLogDetails"[\s\S]{0,200}iconHtml\('detail'\)[\s\S]{0,120}<span>Detail<\/span>/.test(summary)
-  && /maktabQuickLogDetails[\s\S]{0,350}openMaktabDay/.test(summary)
+  && /snapshot\.context\.detail\(snapshot\.type,snapshot\.date,snapshot\.editing\)/.test(summary)
   && /\.maktab-quick-detail-icon \{[\s\S]{0,180}width: 42px;[\s\S]{0,80}height: 42px/.test(css));
 
 check('per-student Attendance action opens the quick popup powered by the established Attendance calendar',

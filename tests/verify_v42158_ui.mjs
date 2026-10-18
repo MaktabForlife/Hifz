@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {readSummarySource} from './helpers/journal-source.mjs';
 // V4.2.15.8 — global auth-band Zoom + blank-date holiday fix +
 // Attendance Quick Action icon alignment + Personal Journal Summary landing +
 // dedicated Maktab Summary Log column/unified Quick Log entry point.
@@ -16,7 +17,7 @@ const check = (label, cond) => { if(cond) pass++; else { fail++; console.log('FA
 const html = read('index.html');
 const auth = read('js/auth.js');
 const app = read('js/app.js');
-const summary = read('js/maktabSummary.js');
+const summary = readSummarySource();
 const sw = read('js/sw.js');
 const journalCss = read('css/journal-table.css');
 const haidhCss = read('css/haidh.css');

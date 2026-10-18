@@ -1,3 +1,4 @@
+import {readSummarySource} from './helpers/journal-source.mjs';
 // ============================================================
 // verify_setup_sheet.mjs — V3.72.0: Setup takes over the Dhor card's
 // Plan button and opens as a sheet.
@@ -30,7 +31,7 @@ const check = (label, cond, extra = '') => {
 const setup = read('js/maktabSetup.js');
 const dhor = read('js/dhorPage.js');
 const day = read('js/maktabDay.js');
-const summary = read('js/maktabSummary.js');
+const summary = readSummarySource();
 const app = read('js/app.js');
 const html = read('index.html');
 

@@ -1,4 +1,5 @@
 import {JSDOM} from 'jsdom';
+import {readSummarySource} from './helpers/journal-source.mjs';
 import {readFileSync} from 'node:fs';
 const read = f => readFileSync(new URL('../'+f, import.meta.url),'utf8');
 let pass=0, fail=0;
@@ -16,7 +17,7 @@ w.logClient=()=>({get:async()=>history});
 w.logDetailSelectedDate=()=> '2026-09-24';
 w.todayISO=()=> '2026-09-24';
 try {
- for(const f of ['shared/data.js','js/uiSwitch.js','js/position.js','js/sabaqDhorPage.js','js/maktabSummary.js'])w.eval(read(f) + (f==='js/maktabSummary.js' ? '\nwindow.setQuickState = value => { maktabQuickLogState = value; };' : ''));
+ for(const f of ['shared/data.js','js/uiSwitch.js','js/position.js','js/sabaqDhorPage.js','js/maktabSummary.js'])w.eval((f==='js/maktabSummary.js'?readSummarySource():read(f)) + (f==='js/maktabSummary.js' ? '\nwindow.setQuickState = value => { maktabQuickLogState = value; };' : ''));
  w.loadPosition=async()=>({});
  await w.renderSabaqDhorScreen();
  check('detail offers picker alongside suggested rows',!!w.document.getElementById('sdq_juz') && w.document.querySelectorAll('.sabaq-dhor-row-text').length>0);
@@ -40,6 +41,7 @@ try {
  const bounds=w.structuralQuarterBounds(2,1,'waterval');
  check('edit picker confirmation applies selected range',w.readSabaqDhorManualField('from').ayah===bounds.startAyah && w.readSabaqDhorManualField('to').ayah===bounds.endAyah);
  w.apiGetMaktabSabaq=async()=>history;w.apiGetMaktabDhor=async()=>[];w.apiGetMaktabPosition=async()=>null;
+ w.loadMaktabSettings=async()=>({mushaf:'13line'});
  const planning=await w.maktabQuickPlanningDefaults('S1','waterval','2026-09-01');
  check('Quick Action planning uses the selected date',planning.sabaqDhorRows.length>0 && planning.sabaqDhorRows.every(r=>w.sabaqDhorRowLabel(r,'waterval').startsWith('Juz 1 ')));
  w.setQuickState({ref:'waterval',sabaqDhorRows:planning.sabaqDhorRows,sabaqDhorPicker:{juz:1,quarter:1}});

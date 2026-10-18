@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {readSummarySource} from './helpers/journal-source.mjs';
 // V4.2.14.1 supersession of the V4.2.11.4 probable-Haidh UI contract.
 import fs from 'fs';
 import path from 'path';
@@ -11,7 +12,7 @@ const read = p => fs.readFileSync(path.join(ROOT, p), 'utf8');
 let pass = 0, fail = 0;
 const check = (label, cond) => { if(cond) pass++; else { fail++; console.log('FAIL:', label); } };
 
-const summary = read('js/maktabSummary.js');
+const summary = readSummarySource();
 const haidh = read('js/haidhDetailScreen.js');
 const haidhCss = read('css/haidh.css');
 const register = read('js/maktabAttendancePage.js');

@@ -1,7 +1,7 @@
-/* Hifzhelper build 4.2.8 | js/journal.js */
+/* Hifzhelper build 5.2 | js/journal.js */
 // ============================================================
 // Hifzhelper — Journal landing page
-// Current as of V3.37
+// V5.2 adds the shared Personal/Maktab quick editor to the V3.37 table.
 //
 // 2026-08-05, confirmed in chat over several rounds -- complete rebuild.
 // The V3.1 version this replaces hadn't been touched since its very
@@ -198,9 +198,7 @@ async function openEntryForEdit(type, entry, isLatest){
   // the PJ edit path (its id is nulled server-side precisely so a missed
   // guard fails loudly; this guard means it doesn't get that far).
   if(entry && entry.source === 'maktab') return;
-  await showScreen('logDetail', type);
-  const handler = EDIT_HANDLERS[type];
-  if(handler) handler(entry, isLatest);
+  return openPersonalQuickLog(entry.date,type,entry);
 }
 
 // Sets every card's own date field to the tapped date and opens the
@@ -209,6 +207,7 @@ async function openEntryForEdit(type, entry, isLatest){
 // filtered browsing, which History's own rail already covers).
 async function openDetailForDate(date){
   await showScreen('logDetail', 'sabaq');
+  if(typeof applyLogDetailSharedDate==='function')applyLogDetailSharedDate(date,false);
   ['sabaq_date', 'sabaqDhor_date', 'dhor_date'].forEach(id => {
     const el = document.getElementById(id);
     if(el) el.value = date;
@@ -220,6 +219,12 @@ function renderJournalRow(date, day){
   dateCell.className = 'cell-date';
   dateCell.innerHTML = formatDateCell(date);
   wireClick(dateCell, () => openDetailForDate(date));
+  const quick=document.createElement('button');
+  quick.type='button';quick.className='personal-journal-log';
+  quick.setAttribute('aria-label','Log activity for '+date);
+  quick.innerHTML=iconHtml('circlePlus')+'<span>Log</span>';
+  quick.addEventListener('click',event=>{event.stopPropagation();openPersonalQuickLog(date);});
+  dateCell.appendChild(quick);
 
   const tr = document.createElement('tr');
   tr.appendChild(dateCell);
@@ -266,7 +271,7 @@ function renderJournalRow(date, day){
           openEntriesPopup(type, day[type], date);
         });
       }
-    }
+    }else wireClick(td,()=>openPersonalQuickLog(date,type));
     tr.appendChild(td);
   });
   return tr;

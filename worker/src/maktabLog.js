@@ -1,4 +1,4 @@
-/* Hifzhelper build 4.2.14 | worker/src/maktabLog.js */
+/* Hifzhelper build 5.2 | worker/src/maktabLog.js */
 // ============================================================
 // Hifzhelper -- Maktab log endpoints (V3.58.0, maktab delivery (d)).
 // The teacher-confirmed record of a Hifz day, completely independent of
@@ -34,6 +34,7 @@
 // abortable force flow as the PJ (V3.45.15).
 // ============================================================
 
+import { JOURNAL_LOG_SCHEMA } from '../../shared/journalSchema.js';
 import { isDuplicate, updateLog, deleteLog, getLogs, applyPrivacy } from './logHelpers.js';
 import { isValidDate, isInRange, isTeacherOrAbove } from './utils.js';
 import { computeDefaultDhorEntry, mergeDhorUnitsIntoPool } from './dhorSchedule.js';
@@ -113,17 +114,17 @@ export { handleMaktabSummary, handleMaktabDhorDefault };
 const CONFIG = {
   sabaq: {
     table: 'maktab_sabaq_log',
-    fields: ['sabaq_from', 'sabaq_to', 'tajweed_tag_ids', 'line_count', 'page_count'],
+    fields: JOURNAL_LOG_SCHEMA.sabaq.fields,
     validate(body) { return null; },
   },
   sabaqDhor: {
     table: 'maktab_sabaq_dhor_log',
-    fields: ['zone', 'tajweed_tag_ids', 'mistakes', 'from_surah', 'from_ayah', 'to_surah', 'to_ayah'],
+    fields: JOURNAL_LOG_SCHEMA.sabaqDhor.fields,
     validate(body) { return null; },
   },
   dhor: {
     table: 'maktab_dhor_log',
-    fields: ['segment_from', 'segment_to', 'ref', 'tajweed_tag_ids', 'mistakes', 'duration_seconds', 'lap_times'],
+    fields: JOURNAL_LOG_SCHEMA.dhor.fields,
     validate(body) {
       if (body.ref != null && !['waterval', 'uthmani'].includes(body.ref)) return 'ref must be waterval or uthmani';
       if (body.segment_from != null && !isInRange(body.segment_from, 1, 240)) return 'segment_from out of range';

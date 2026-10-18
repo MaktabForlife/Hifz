@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {readSummarySource} from './helpers/journal-source.mjs';
 // V4.2.8.2 cumulative UI pins — items 68 + 72 plus the mobile-summary follow-up patches.
 // Static/structural pins only: no jsdom dependency, so this harness can run
 // even in a bare checkout before the broader test dependencies are present.
@@ -12,7 +13,7 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 let pass = 0, fail = 0;
 const check = (label, cond, extra = '') => { if(cond) pass++; else { fail++; console.log('FAIL:', label, extra); } };
 
-const summaryJs = read('js/maktabSummary.js');
+const summaryJs = readSummarySource();
 const maktabJournalJs = read('js/maktabJournal.js');
 const journalCss = read('css/journal-table.css');
 const sdJs = read('js/sabaqDhorPage.js');
@@ -53,7 +54,7 @@ check('4.2.8.2/current: summary targets remain distinct with dedicated Log and Q
   && /btn\.addEventListener\('click',[\s\S]{0,260}maktabOpenQuickAttendance/.test(summaryJs)
   && /mobileLogBtn\.addEventListener\('click',[\s\S]{0,520}maktabOpenQuickLog/.test(summaryJs)
   && !/td\.addEventListener\('click',[\s\S]{0,360}maktabOpenQuickLog/.test(summaryJs)
-  && /maktabQuickLogDetails[\s\S]{0,500}openMaktabDay/.test(summaryJs));
+  && /snapshot\.context\.detail\(snapshot\.type,snapshot\.date,snapshot\.editing\)/.test(summaryJs));
 
 check('72: old quarter select and Use button are gone',
   !/id="sdq_apply"|class="secondary sdq-apply"|>Use</.test(sdJs)

@@ -8,6 +8,19 @@ Specs for delivered work live in `SPECS.md`; what changed and which files
 were touched lives in `CHANGELOG.md`. Neither is an action list. This file
 is the only one that is.
 
+## V5.2 — Development review (2026-10-18)
+
+The shared Personal/Maktab Add/Edit Quick Log is implemented for development.
+Review it at `https://dev.maktab-hifz.pages.dev/` using development credentials.
+Use each date's Log button or tap an owned personal activity; in Maktab, use Log,
+then select an already logged entry to edit it. Detail retains the full forms.
+
+Production publication requires separate explicit approval. No Academy code, live
+database schema, profile, PIN or original unbranded repository changes are included.
+Pages preview sign-in from Academy still uses the existing fixed development return
+origin (`hifzhelper-dev.pages.dev`); use direct development PIN sign-in to test this
+branded preview. No changes to that sign-in protocol are part of V5.2.
+
 ## V5.1 — Academy banners and Hifz navigation (2026-10-17)
 
 The authenticated app uses Academy's two top banners: local Academy branding,
