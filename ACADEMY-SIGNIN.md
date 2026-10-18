@@ -1,13 +1,16 @@
-# Academy PIN and sign-in — V5.0
+# Academy PIN and sign-in — V5.1
 
 ## V5.1 production rollout
 
 `hifz.maktab4life.org` uses the existing production Worker and D1. `hifzhelper-dev.pages.dev` retains the separate development Worker and D1. The existing shared PIN and profile-signing keys are provisioned in production without rotation. Production identity migrations preserve existing journals and use verified immutable Academy account IDs. Academy automatically delivers profile/PIN changes to production; development can request a current-profile sign-in handoff through its separate fixed destination.
 
-Development frontend: `https://hifz.maktab4life.org/`.
+Production frontend: `https://hifz.maktab4life.org/`.
+Production API: `https://hifzhelper-api.hifzhelper-app.workers.dev`.
+Development frontend: `https://hifzhelper-dev.pages.dev/`.
 Development API: `https://hifzhelper-api-dev.hifzhelper-app.workers.dev`.
 Repository copy: `https://github.com/MaktabForlife/Hifz` (main/dev history preserved).
-The separate Hifz Cloudflare account and development D1 remain in use.
+The separate Hifz Cloudflare account and both D1 databases remain in use. Branded
+static hosting uses the existing MaktabForlife Git connection; see DEPLOYMENT.md.
 
 ## PIN authority
 
@@ -43,19 +46,22 @@ the stronger format. Direct personal links retain PIN authentication.
 5. The code returns in the fixed Hifz URL fragment. Hifz removes it from history
    immediately and accepts it only with the original state/verifier and configured
    frontend Origin. Atomic DELETE RETURNING ensures one redemption. Current local
-   activity and epoch are checked before issuing a normal Hifz session.
+activity and epoch are checked before issuing a normal Hifz session.
 
 No caller chooses a return address or role. No PIN/hash or Academy session token
 travels between frontend origins. Temporary codes never enter query strings or
 referrers; authentication responses use private no-store headers. Journal use has
-no Academy dependency after entry. No production settings or database are changed.
+no Academy dependency after entry. Production and development have distinct fixed
+handoff destinations and frontend origins.
 
 ## Rollout and checks
 
 Hifz migration 0033 adds the source epoch and indexed temporary code-digest table.
 Academy migration 0029 queues PIN setup/upgrades; the existing reset trigger remains.
-Configure the matching development-only pepper and deploy the receiver before the
-sender. Keep the previous PIN secrets for transparent legacy verification.
+Configure the matching shared pepper independently in each environment and deploy
+the receiver before the sender. Keep the previous PIN secrets for transparent
+legacy verification. Automatic Academy profile/PIN delivery targets production;
+the explicit development handoff refreshes only that development user's profile.
 
 Security checks cover native PBKDF2 interoperability, exact copied hashes, correct
 and incorrect PINs, signatures, wrong targets, assertion/code expiry, wrong browser
