@@ -5,6 +5,17 @@ future delivery only needs those specific files re-uploaded — not the whole
 repo. See `SETUP.md` for initial setup, `SCHEMA.md`/`CONVENTIONS.md` for the
 standing reference docs (those aren't repeated here unless they change).
 
+## V5.2.1 — Academy Hifz name and PIN setup message (2026-10-18)
+
+Login screens, browser/install titles, the signed-in banner and personal-link
+copy now say Academy Hifz. The development PIN setup screen explains that its
+profile has no saved PIN and that the live Academy PIN delivery targets production,
+so a development credential needs separate synchronisation. Authentication rules,
+credentials, profiles, databases and the existing support address are unchanged.
+Branded dev branch only; production and the original repository remain unchanged.
+
+Files: index.html, js/auth.js, js/sw.js, manifest.json, CHANGELOG.md, TESTING.md.
+
 ## V5.2 — Shared Personal and Maktab Quick Log (2026-10-18)
 
 Personal Journal has a Log action on each date and opens the shared quick editor

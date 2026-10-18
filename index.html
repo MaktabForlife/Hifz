@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<!-- Hifzhelper build 5.2 | index.html -->
+<!-- Hifzhelper build 5.2.1 | index.html -->
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Hifzhelper</title>
+<title>Academy Hifz</title>
 
 <!-- Favicon (browser tab) -->
 <link rel="icon" href="appicons/favicon.ico" sizes="any">
@@ -16,32 +16,32 @@
 <link rel="apple-touch-icon" href="appicons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Hifzhelper">
+<meta name="apple-mobile-web-app-title" content="Academy Hifz">
 
 <!-- Apple mobile must install the CURRENT /<uniqueID> page, not the shared
      manifest's generic start_url. Other platforms still receive the full
      installable manifest. Runs in <head> before Add to Home Screen can read
      the page's installation metadata. -->
-<script src="js/pwaManifest.js?v=5.2"></script>
+<script src="js/pwaManifest.js?v=5.2.1"></script>
 
-<link rel="stylesheet" href="css/tokens.css?v=5.2">
-<link rel="stylesheet" href="css/base.css?v=5.2">
-<link rel="stylesheet" href="css/nav.css?v=5.2">
-<link rel="stylesheet" href="css/journal-table.css?v=5.2">
-<link rel="stylesheet" href="css/daily-report.css?v=5.2">
-<link rel="stylesheet" href="css/components.css?v=5.2">
-<link rel="stylesheet" href="css/detail-pages.css?v=5.2">
-<link rel="stylesheet" href="css/settings.css?v=5.2">
-<link rel="stylesheet" href="css/admin.css?v=5.2">
-<link rel="stylesheet" href="css/haidh.css?v=5.2">
-<link rel="stylesheet" href="css/juzTracker.css?v=5.2">
-<link rel="stylesheet" href="css/sih.css?v=5.2">
+<link rel="stylesheet" href="css/tokens.css?v=5.2.1">
+<link rel="stylesheet" href="css/base.css?v=5.2.1">
+<link rel="stylesheet" href="css/nav.css?v=5.2.1">
+<link rel="stylesheet" href="css/journal-table.css?v=5.2.1">
+<link rel="stylesheet" href="css/daily-report.css?v=5.2.1">
+<link rel="stylesheet" href="css/components.css?v=5.2.1">
+<link rel="stylesheet" href="css/detail-pages.css?v=5.2.1">
+<link rel="stylesheet" href="css/settings.css?v=5.2.1">
+<link rel="stylesheet" href="css/admin.css?v=5.2.1">
+<link rel="stylesheet" href="css/haidh.css?v=5.2.1">
+<link rel="stylesheet" href="css/juzTracker.css?v=5.2.1">
+<link rel="stylesheet" href="css/sih.css?v=5.2.1">
 </head>
 <body>
 
 <div id="errorBanner"></div>
 <div class="login-screen hidden" id="academyHandoffScreen">
- <div class="login-card"><img src="appicons/logo.png" alt="Hifzhelper" class="login-logo"><div class="eyebrow">Hifzhelper</div>
+ <div class="login-card"><img src="appicons/logo.png" alt="Academy Hifz" class="login-logo"><div class="eyebrow">Academy Hifz</div>
  <h1 id="academyHandoffTitle">Opening Hifz</h1><p id="academyHandoffStatus" role="status" aria-live="polite">Checking your Academy sign-in…</p>
  <div class="login-links"><a id="academyHandoffReturn" class="link-btn">Return to Academy</a><a href="/" class="link-btn">Sign in with a PIN</a></div></div>
 </div>
@@ -50,8 +50,8 @@
      that doesn't exist, or an ID that exists but isn't active) ================= -->
 <div class="login-screen hidden" id="loginScreenFallback">
   <div class="login-card">
-    <img src="appicons/logo.png" alt="Hifzhelper" class="login-logo">
-    <div class="eyebrow">Hifzhelper</div>
+    <img src="appicons/logo.png" alt="Academy Hifz" class="login-logo">
+    <div class="eyebrow">Academy Hifz</div>
     <h1>Sign in</h1>
     <label>Your ID</label>
     <input type="text" id="fallback_login_id" placeholder="e.g. K7M2QX" autocapitalize="characters">
@@ -75,8 +75,8 @@
      ================= -->
 <div class="login-screen hidden" id="loginScreenSwitch">
   <div class="login-card">
-    <img src="appicons/logo.png" alt="Hifzhelper" class="login-logo">
-    <div class="eyebrow">Hifzhelper</div>
+    <img src="appicons/logo.png" alt="Academy Hifz" class="login-logo">
+    <div class="eyebrow">Academy Hifz</div>
     <h1>Switch account</h1>
     <div class="form-hint" style="margin-top:0;">Accounts that have signed in on this device. You'll be asked for the PIN.</div>
     <div class="switch-account-list" id="switchAccountList"></div>
@@ -88,8 +88,8 @@
      or remembered on this device, PIN already set) ================= -->
 <div class="login-screen hidden" id="loginScreenPersonal">
   <div class="login-card">
-    <img src="appicons/logo.png" alt="Hifzhelper" class="login-logo">
-    <div class="eyebrow">Hifzhelper</div>
+    <img src="appicons/logo.png" alt="Academy Hifz" class="login-logo">
+    <div class="eyebrow">Academy Hifz</div>
     <h1 id="personalGreeting">Ahlan wa Sahlan</h1>
     <div class="form-hint" style="margin-top:0;">Enter your pin to sign in</div>
     <div class="pin-box-row" style="margin-top:var(--space-md);">
@@ -108,8 +108,8 @@
      remembered account that has no PIN yet) ================= -->
 <div class="login-screen hidden" id="createPinScreen">
   <div class="login-card">
-    <img src="appicons/logo.png" alt="Hifzhelper" class="login-logo">
-    <div class="eyebrow">Hifzhelper</div>
+    <img src="appicons/logo.png" alt="Academy Hifz" class="login-logo">
+    <div class="eyebrow">Academy Hifz</div>
     <h1 id="createPinGreeting">Ahlan wa Sahlan</h1>
     <div class="form-hint" id="createPinStepHint" style="margin-top:0;">Create a PIN to secure your journal</div>
     <div id="createPinEntryWrap">
@@ -144,8 +144,8 @@
 <!-- ================= REGISTER ================= -->
 <div class="login-screen hidden" id="registerScreen">
   <div class="login-card">
-    <img src="appicons/logo.png" alt="Hifzhelper" class="login-logo">
-    <div class="eyebrow">Hifzhelper</div>
+    <img src="appicons/logo.png" alt="Academy Hifz" class="login-logo">
+    <div class="eyebrow">Academy Hifz</div>
     <h1>Register</h1>
     <label>Your name</label>
     <input type="text" id="register_name">
@@ -169,7 +169,7 @@
      successful registration) ================= -->
 <div class="login-screen hidden" id="registeredScreen">
   <div class="login-card">
-    <div class="eyebrow">Hifzhelper</div>
+    <div class="eyebrow">Academy Hifz</div>
     <h1>Registered!</h1>
     <p class="form-hint" id="registeredMessage" style="white-space:pre-line;"></p>
     <label>Your personal URL</label>
@@ -184,11 +184,11 @@
 <!-- ================= APP SHELL ================= -->
 <div id="appShell" style="display:none;">
 
-  <header id="authBand" aria-label="HifzHelper banners">
+  <header id="authBand" aria-label="Academy Hifz banners">
     <div class="hifz-brand-banner">
-      <a class="hifz-academy-brand" href="#home" id="hifzBrandHome" aria-label="HifzHelper home">
+      <a class="hifz-academy-brand" href="#home" id="hifzBrandHome" aria-label="Academy Hifz home">
         <img src="appicons/academy.png" alt="">
-        <span><strong>Umm Abbad<br>Academy</strong><small id="hifzHeaderVersion">HifzHelper</small></span>
+        <span><strong>Umm Abbad<br>Academy</strong><small id="hifzHeaderVersion">Academy Hifz</small></span>
       </a>
       <aside class="hifz-date-box" aria-label="Today’s Hijri and Gregorian dates">
         <em id="hifzHijriDate" title="Hijri date from Jamiat">Loading Hijri date…</em>
@@ -1420,46 +1420,46 @@
      on open), never auto-started. -->
 <session-timer id="dhorTimerHost" target="40" accent="#829672" class="hidden"></session-timer>
 
-<script src="shared/data.js?v=5.2"></script>
-<script src="shared/haidhRules.js?v=5.2"></script>
-<script src="shared/journalSchema.js?v=5.2"></script>
-<script src="js/icons.js?v=5.2"></script>
-<script src="js/customDate.js?v=5.2"></script>
-<script src="js/api.js?v=5.2"></script>
-<script src="js/logContext.js?v=5.2"></script>
-<script src="js/uiSwitch.js?v=5.2"></script>
-<script src="js/position.js?v=5.2"></script>
-<script src="js/headerDate.js?v=5.2"></script>
-<script src="js/auth.js?v=5.2"></script>
-<script src="js/home.js?v=5.2"></script>
-<script src="js/tajweed.js?v=5.2"></script>
-<script src="js/commentPrivacy.js?v=5.2"></script>
-<script src="js/session-timer.js?v=5.2"></script>
-<script src="js/journal.js?v=5.2"></script>
-<script src="js/journalQuickContext.js?v=5.2"></script>
-<script src="js/journalQuickEditor.js?v=5.2"></script>
-<script src="js/maktabSummary.js?v=5.2"></script>
-<script src="js/maktabDailyReport.js?v=5.2"></script>
-<script src="js/maktabSettings.js?v=5.2"></script>
-<script src="js/maktabSetup.js?v=5.2"></script>
-<script src="js/maktabDay.js?v=5.2"></script>
-<script src="js/maktabJournal.js?v=5.2"></script>
-<script src="js/maktabCalendarPage.js?v=5.2"></script>
-<script src="js/maktabAttendancePage.js?v=5.2"></script>
-<script src="js/dhorPage.js?v=5.2"></script>
-<script src="js/sabaqPage.js?v=5.2"></script>
-<script src="js/sabaqDhorPage.js?v=5.2"></script>
-<script src="js/reflectionCard.js?v=5.2"></script>
-<script src="js/logDetailScreen.js?v=5.2"></script>
-<script src="js/haidhDetailScreen.js?v=5.2"></script>
-<script src="js/kaabaTracker.js?v=5.2"></script>
-<script src="js/juzTrackerScreen.js?v=5.2"></script>
-<script src="js/sihScreen.js?v=5.2"></script>
-<script src="js/settingsScreen.js?v=5.2"></script>
-<script src="js/adminPage.js?v=5.2"></script>
-<script src="js/versionStamp.js?v=5.2"></script>
-<script src="js/academy-handoff.js?v=5.2"></script>
-<script src="js/app.js?v=5.2"></script>
-<script src="js/maktabAttendanceReport.js?v=5.2"></script>
+<script src="shared/data.js?v=5.2.1"></script>
+<script src="shared/haidhRules.js?v=5.2.1"></script>
+<script src="shared/journalSchema.js?v=5.2.1"></script>
+<script src="js/icons.js?v=5.2.1"></script>
+<script src="js/customDate.js?v=5.2.1"></script>
+<script src="js/api.js?v=5.2.1"></script>
+<script src="js/logContext.js?v=5.2.1"></script>
+<script src="js/uiSwitch.js?v=5.2.1"></script>
+<script src="js/position.js?v=5.2.1"></script>
+<script src="js/headerDate.js?v=5.2.1"></script>
+<script src="js/auth.js?v=5.2.1"></script>
+<script src="js/home.js?v=5.2.1"></script>
+<script src="js/tajweed.js?v=5.2.1"></script>
+<script src="js/commentPrivacy.js?v=5.2.1"></script>
+<script src="js/session-timer.js?v=5.2.1"></script>
+<script src="js/journal.js?v=5.2.1"></script>
+<script src="js/journalQuickContext.js?v=5.2.1"></script>
+<script src="js/journalQuickEditor.js?v=5.2.1"></script>
+<script src="js/maktabSummary.js?v=5.2.1"></script>
+<script src="js/maktabDailyReport.js?v=5.2.1"></script>
+<script src="js/maktabSettings.js?v=5.2.1"></script>
+<script src="js/maktabSetup.js?v=5.2.1"></script>
+<script src="js/maktabDay.js?v=5.2.1"></script>
+<script src="js/maktabJournal.js?v=5.2.1"></script>
+<script src="js/maktabCalendarPage.js?v=5.2.1"></script>
+<script src="js/maktabAttendancePage.js?v=5.2.1"></script>
+<script src="js/dhorPage.js?v=5.2.1"></script>
+<script src="js/sabaqPage.js?v=5.2.1"></script>
+<script src="js/sabaqDhorPage.js?v=5.2.1"></script>
+<script src="js/reflectionCard.js?v=5.2.1"></script>
+<script src="js/logDetailScreen.js?v=5.2.1"></script>
+<script src="js/haidhDetailScreen.js?v=5.2.1"></script>
+<script src="js/kaabaTracker.js?v=5.2.1"></script>
+<script src="js/juzTrackerScreen.js?v=5.2.1"></script>
+<script src="js/sihScreen.js?v=5.2.1"></script>
+<script src="js/settingsScreen.js?v=5.2.1"></script>
+<script src="js/adminPage.js?v=5.2.1"></script>
+<script src="js/versionStamp.js?v=5.2.1"></script>
+<script src="js/academy-handoff.js?v=5.2.1"></script>
+<script src="js/app.js?v=5.2.1"></script>
+<script src="js/maktabAttendanceReport.js?v=5.2.1"></script>
 </body>
 </html>

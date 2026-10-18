@@ -1,4 +1,4 @@
-/* Hifzhelper build 5.1 | js/auth.js */
+/* Hifzhelper build 5.2.1 | js/auth.js */
 // ============================================================
 // Hifzhelper — auth: login screen, top auth band, dropdown menu
 // ============================================================
@@ -213,10 +213,10 @@ function updateAuthBandZoom(){
   else el.removeAttribute('href');
 }
 function renderAuthBand(){
-  document.querySelector('#authBand .user-name').textContent = currentUser.name || 'Hifzhelper';
+  document.querySelector('#authBand .user-name').textContent = currentUser.name || 'Academy Hifz';
   const role=document.getElementById('hifzHeaderRole'),version=document.getElementById('hifzHeaderVersion');
   if(role)role.textContent=({student:'Student',teacher:'Teacher',admin:'Admin'})[currentUser.role]||'';
-  if(version)version.textContent='HifzHelper'+(typeof appVersionFromScriptTag==='function'?' V'+(appVersionFromScriptTag()||''):'' );
+  if(version)version.textContent='Academy Hifz'+(typeof appVersionFromScriptTag==='function'?' V'+(appVersionFromScriptTag()||''):'' );
   updateAuthBandZoom();
 }
 
@@ -648,7 +648,7 @@ function cancelRegisterMatch(){
 
 // Exact confirmed wording (see chat) — shown verbatim, never reworded.
 const REGISTRATION_CONFIRMATION_TEXT =
-`This is your personal URL to access your Hifzhelper Journal. Do not share the link.
+`This is your personal URL to access your Academy Hifz Journal. Do not share the link.
 1. For the best experience on phones install as an app on your phone.
 2. CREATE an easy to remember pin
 3. LOGIN with your pin
@@ -700,7 +700,7 @@ function showFirstLoginMessage(){
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `<div class="modal-card">
     <h2>You're all set!</h2>
-    <p class="form-hint">Save this page's URL somewhere safe, or add it to your home screen now — that's how you'll come back to Hifzhelper next time.</p>
+    <p class="form-hint">Save this page's URL somewhere safe, or add it to your home screen now — that's how you'll come back to Academy Hifz next time.</p>
     <div class="modal-actions"><button class="primary" id="firstLoginOkBtn">Got it</button></div>
   </div>`;
   document.body.appendChild(overlay);
@@ -710,7 +710,10 @@ function showFirstLoginMessage(){
 function showAcademyPinSetup(name){
  hideAllLoginScreens();document.getElementById('appShell').style.display='none';
  document.getElementById('academyHandoffTitle').textContent=name?`Ahlan wa Sahlan, ${name}`:'Set your PIN in Academy';
- document.getElementById('academyHandoffStatus').textContent='Sign into Academy and open HifzHelper. New and reset PINs are chosen and confirmed in Academy, then shared with Hifz.';
+ const development=typeof ACADEMY_INTEGRATION!=='undefined'&&ACADEMY_INTEGRATION?.environment==='development';
+ document.getElementById('academyHandoffStatus').textContent=development
+  ? 'Your development Academy Hifz profile has no PIN saved. Academy currently sends PIN updates to the live Academy Hifz site. This test profile needs its PIN synchronised separately before you can sign in.'
+  : 'Your Academy Hifz profile has no PIN saved. Sign in to Academy with your PIN, then open Academy Hifz. New and reset PINs are chosen and confirmed in Academy, then shared with Academy Hifz.';
  document.getElementById('academyHandoffReturn').href=ACADEMY_INTEGRATION?.home||'/';
  document.getElementById('academyHandoffScreen').classList.remove('hidden');
 }

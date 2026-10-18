@@ -1,3 +1,11 @@
+## Academy Hifz naming — V5.2.1 (2026-10-18)
+
+All 87 existing harnesses pass: 2,068 checks, zero failures, including PIN
+confirmation, Academy handoff, profile delivery, login/navigation and build keys.
+Only visible names, install metadata and PIN setup explanation change. Read-only
+public lookup confirmed the reported profile has no saved Hifz PIN; no credentials
+or profile rows are modified as part of this update. Publish branded dev only.
+
 ## Shared journal quick editor — V5.2 (2026-10-18)
 
 All 87 harnesses pass: 2,068 checks, zero failures. The development Worker
