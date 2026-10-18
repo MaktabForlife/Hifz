@@ -26,8 +26,13 @@ for(const [role,screen,forbidden] of [
  check(role+' highlights the current destination',menu.querySelector('[data-nav="'+screen+'"]').getAttribute('aria-pressed')==='true');
  doc.getElementById('homeDropdownBtn').click();check(role+' Home still opens Hifz Home',opened.at(-1)==='home');
  doc.getElementById('timerDropdownBtn').click();check(role+' Timer still opens',opened.at(-1)==='timer');
- for(const id of ['homeDropdownBtn','refreshBtn','logoutBtn'])check(role+' keeps one '+id+' in page actions',doc.querySelectorAll('#'+id).length===1&&doc.getElementById(id).parentElement.id==='hifzPageActions');
+ for(const id of ['homeDropdownBtn','refreshBtn','logoutBtn'])check(role+' keeps one '+id+' in top-banner page actions',doc.querySelectorAll('#'+id).length===1&&doc.getElementById(id).parentElement.id==='hifzPageActions'&&!!doc.getElementById(id).closest('.hifz-brand-banner'));
  w.eval("setMaktabZoomLink('https://zoom.invalid/class');updateAuthBandZoom();");check(role+' keeps the configured class Zoom link',doc.getElementById('authBandZoom').href==='https://zoom.invalid/class'&&!doc.getElementById('authBandZoom').classList.contains('hidden'));
+ w.setupAuthBandAndDropdown();w.setupAuthBandAndDropdown();
+ check(role+' repeated header setup cannot duplicate page controls', ['homeDropdownBtn','refreshBtn','logoutBtn','authBandZoom'].every(id=>doc.querySelectorAll('#'+id).length===1));
+ check(role+' second banner contains profile and navigation only', !doc.querySelector('.hifz-account-banner #hifzPageActions,.hifz-account-banner #authBandZoom'));
+ const clicks=opened.filter(item=>item==='home').length;doc.getElementById('homeDropdownBtn').click();
+ check(role+' rebuilt Home action navigates exactly once',opened.filter(item=>item==='home').length===clicks+1);
  dom.window.close();
 }
 const dateHtml='<div class="dual-date-widget" data-site-y="2026" data-site-m="10" data-site-d="17"><div class="value islamic hd-out">6 Jumada al-ula 1448</div></div>';

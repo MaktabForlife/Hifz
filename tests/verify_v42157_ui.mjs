@@ -52,8 +52,8 @@ check('Profile boot payload carries the configured Zoom link without widening Ma
   && /row\.maktab_zoom_link =/.test(workerProfile)
   && /handleGetMaktabSettings[\s\S]{0,220}!isTeacherOrAbove\(auth\)/.test(workerSettings));
 
-check('the blue ZOOM action remains available beside the banner page controls',
-  /id="hifzPageActions"[\s\S]{0,400}id="authBandZoom"[\s\S]{0,180}>ZOOM<\/a>/.test(html)
+check('the blue ZOOM action is separate from the top-banner page controls',
+  /id="authBandZoom"[\s\S]{0,220}>ZOOM<\/a>\s*<div id="hifzPageActions"/.test(html)
   && /background:#0b5cff/.test(navCss) && /color:#fff/.test(navCss));
 
 check('ZOOM follows the authenticated band on every app screen when configured',

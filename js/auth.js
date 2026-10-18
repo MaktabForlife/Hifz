@@ -1,4 +1,4 @@
-/* Hifzhelper build 5.2.1 | js/auth.js */
+/* Hifzhelper build 5.2.2 | js/auth.js */
 // ============================================================
 // Hifzhelper — auth: login screen, top auth band, dropdown menu
 // ============================================================
@@ -233,15 +233,19 @@ function setupAuthBandAndDropdown(){
   // after the items — they could not be interleaved into the requested
   // order that way. visibleNavGroups() places them; their ids and existing
   // listeners are unchanged.
-  renderNavItemsInto('authDropdownNav');
   const actions=document.getElementById('hifzPageActions');
+  // A second boot/sign-in renders fresh menu buttons. Remove the previous
+  // action buttons first so duplicate IDs cannot leave another set in the nav.
+  if(actions)actions.replaceChildren();
+  renderNavItemsInto('authDropdownNav');
   if(actions){
     const home=document.getElementById('homeDropdownBtn'),refresh=document.getElementById('refreshBtn'),logout=document.getElementById('logoutBtn');
     home.setAttribute('aria-label','Home');refresh.setAttribute('aria-label','Refresh this page');
     for(const button of [home,refresh,logout])button.className='hifz-page-action';
     actions.prepend(home,refresh);actions.append(logout);
   }
-  document.getElementById('hifzBrandHome')?.addEventListener('click',event=>{event.preventDefault();showScreen('home');});
+  const brandHome=document.getElementById('hifzBrandHome');
+  if(brandHome)brandHome.onclick=event=>{event.preventDefault();showScreen('home');};
   if(typeof setupHifzHeaderDate==='function')setupHifzHeaderDate();
   if(typeof ResizeObserver!=='undefined')new ResizeObserver(entries=>document.documentElement.style.setProperty('--auth-band-height',entries[0].target.getBoundingClientRect().height+'px')).observe(document.getElementById('authBand'));
   document.getElementById('homeDropdownBtn').addEventListener('click', () => {

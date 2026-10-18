@@ -1,3 +1,15 @@
+## Header controls — V5.2.2 (2026-10-18)
+
+All 87 harnesses pass: 2,077 checks, zero failures.
+
+Header checks cover all three roles, one set of page controls in the top banner,
+the configured Zoom link, navigation, and repeated header setup without duplicate
+IDs or duplicate Home actions. Local Chrome verification uses sample data only:
+at 1688px the Zoom centre exactly matches the banner centre; at 390px all controls
+fit without overlap or horizontal page overflow. The second banner contains the
+profile and Hifz navigation. No Academy or live journal requests are used for
+these visual checks. Branded dev publication only.
+
 ## Academy Hifz naming — V5.2.1 (2026-10-18)
 
 All 87 existing harnesses pass: 2,068 checks, zero failures, including PIN

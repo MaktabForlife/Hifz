@@ -5,6 +5,19 @@ future delivery only needs those specific files re-uploaded — not the whole
 repo. See `SETUP.md` for initial setup, `SCHEMA.md`/`CONVENTIONS.md` for the
 standing reference docs (those aren't repeated here unless they change).
 
+## V5.2.2 — Hifz header controls (2026-10-18)
+
+The top banner groups Academy branding and dates on the left, the configured Zoom
+link in the centre and one set of Home/Refresh/Sign out controls on the right.
+The second banner contains the profile and role-aware Hifz navigation. Phones
+keep branding/dates above the Zoom and page controls, without horizontal overflow.
+Repeated header setup removes previous action buttons before rendering fresh ones,
+preventing duplicate controls and repeated Home actions after another sign-in.
+
+Files: index.html, css/nav.css, js/auth.js, js/sw.js,
+tests/verify_academy_banners.mjs, tests/verify_v42157_ui.mjs, CHANGELOG.md, TESTING.md. Branded dev only;
+no API, Academy, PIN or database changes.
+
 ## V5.2.1 — Academy Hifz name and PIN setup message (2026-10-18)
 
 Login screens, browser/install titles, the signed-in banner and personal-link
