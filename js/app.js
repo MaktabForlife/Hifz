@@ -1,6 +1,6 @@
 /* Hifzhelper build 5.2 | js/app.js */
 // ============================================================
-// Hifzhelper — app bootstrap and screen routing
+// Hifzhelper — app bootstrap and screen routing  - rebuild
 // ============================================================
 
 // A visible way to surface errors — never a silent failure.
