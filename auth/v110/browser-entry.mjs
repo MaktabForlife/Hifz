@@ -10,7 +10,7 @@ export function installNativePrivacy({win,doc,config,nativeFetch}){
  if([...apiOrigins].some(origin=>{try{return new URL(origin).origin!==origin;}catch{return true;}}))throw Error('INVALID_NATIVE_API_ORIGIN');
  const contextURL=origins[app]+'/auth/v110/context';
  const publicPaths={
-  academy:new Set(['/api/account/check','/api/account/login','/api/account/setup-pin','/api/account/logout','/api/academy/setup/head']),
+  academy:new Set(['/api/account/check','/api/account/login','/api/account/setup-pin','/api/account/logout','/api/academy/hub/login','/api/academy/setup/head']),
   studio:new Set(['/auth/login','/auth/exchange','/auth/logout','/api/config']),
   hifz:new Set(['/auth/academy','/auth/lookup','/auth/policy'])
  }[app];
