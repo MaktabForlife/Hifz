@@ -256,7 +256,7 @@ function setupAuthBandAndDropdown(){
     openFloatingTimer();
   });
   document.getElementById('logoutBtn').addEventListener('click', async () => {
-    const clearing=window.M4L_V110?.clearAll('logout').catch(()=>{});
+    const clearing=globalThis.M4L_V110?.clearAll('logout').catch(()=>{});
     clearToken();
     await clearing;location.reload();
   });
@@ -264,7 +264,7 @@ function setupAuthBandAndDropdown(){
   // screen for the account just left. The token goes first — the switcher
   // never carries a session across accounts.
   document.getElementById('switchAccountBtn').addEventListener('click', async () => {
-    const clearing=window.M4L_V110?.clearAll('switch').catch(()=>{});
+    const clearing=globalThis.M4L_V110?.clearAll('switch').catch(()=>{});
     clearToken();
     requestAccountSwitch();
     await clearing;location.reload();

@@ -117,7 +117,7 @@ function replaceUrlWithLoginId(id){
 // Every call surfaces real errors rather than returning something that
 // looks like empty/default data — callers must expect this to throw.
 async function apiFetch(path, options = {}){
-  if(window.M4L_V110&&!path.startsWith('/auth/')&&!await window.M4L_V110.ready())throw new DOMException('Current Academy sign-in is required.','AbortError');
+  if(globalThis.M4L_V110&&!path.startsWith('/auth/')&&!await globalThis.M4L_V110.ready())throw new DOMException('Current Academy sign-in is required.','AbortError');
   const v110Generation=typeof v110HifzGeneration==='number'?v110HifzGeneration:0;
   const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
   const token = getToken();
@@ -140,7 +140,7 @@ async function apiFetch(path, options = {}){
     if(body && body.code) err.code = body.code;   // V3.76.2: which rule refused, when the worker says
     throw err;
   }
-  if(window.M4L_V110&&v110Generation!==v110HifzGeneration)throw new DOMException('Your Hifz account changed.','AbortError');
+  if(globalThis.M4L_V110&&v110Generation!==v110HifzGeneration)throw new DOMException('Your Hifz account changed.','AbortError');
   return body;
 }
 
@@ -390,4 +390,4 @@ function apiGetMaktabAttendanceReport(from, to){ return apiFetch('/maktab/attend
 
 // Private context loss invalidates any response begun for the old native user.
 let v110HifzGeneration=0;
-window.addEventListener('uaa-v110-private-cleared',()=>{v110HifzGeneration++;});
+globalThis.addEventListener?.('uaa-v110-private-cleared',()=>{v110HifzGeneration++;});
