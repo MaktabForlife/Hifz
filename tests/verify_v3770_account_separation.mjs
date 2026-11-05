@@ -11,6 +11,7 @@
 // ============================================================
 
 import fs from 'fs';
+import vm from 'node:vm';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { JSDOM } from 'jsdom';
@@ -214,8 +215,28 @@ const authSrc = read('js/auth.js');
   check('switch: chip names are escaped', (() => { w.eval("KNOWN = [{ id: 'X', name: '<b>x</b>', role: 'student' }]"); w.eval('renderSwitchAccountList()'); return w.document.querySelector('.switch-account-name b') === null; })());
 }
 check('menu: Switch account sits between Refresh and Log out', /\{ id: 'switchAccount', label: 'Switch account', icon: 'switchAccount', raw: 'switchAccountBtn' \}/.test(authSrc));
-check('menu: its listener clears the token BEFORE requesting the switch and reloading',
-  /switchAccountBtn'\)\.addEventListener\('click', \(\) => \{\n\s*clearToken\(\);\n\s*requestAccountSwitch\(\);\n\s*location\.reload\(\);/.test(authSrc));
+// Exercise the real listener. Cross-app acknowledgement may be pending, but
+// the local token and switch intent must already be cleared before any wait.
+for (const feature of [false, true]) {
+  const events = []; let listener, release;
+  const pending = new Promise(resolve => { release = resolve; });
+  const start = authSrc.indexOf("document.getElementById('switchAccountBtn').addEventListener");
+  const stop = authSrc.indexOf("document.getElementById('refreshBtn')", start);
+  const context = {
+    document: { getElementById: () => ({ addEventListener: (type, fn) => { listener = fn; } }) },
+    clearToken: () => events.push('clear'),
+    requestAccountSwitch: () => events.push('switch'),
+    location: { reload: () => events.push('reload') },
+    M4L_V110: feature ? { clearAll: reason => { events.push(reason); return pending; } } : undefined,
+  };
+  vm.runInNewContext(authSrc.slice(start, stop), context);
+  const done = listener();
+  check('menu: local token clears before switch intent and before reload (feature=' + feature + ')',
+    events[0] === 'clear' && events[1] === 'switch' && !events.includes('reload'));
+  release(); await done;
+  check('menu: reload follows cross-app clearing (feature=' + feature + ')',
+    events[events.length - 1] === 'reload' && (!feature || events[2] === 'switch'));
+}
 check('router: the switch flag is checked first and only honoured with known accounts', /if\(consumeAccountSwitchRequest\(\) && getKnownAccounts\(\)\.length\)\{\n\s*showSwitchScreen\(\);/.test(authSrc));
 check('boot: the signed-in account is recorded for the switcher', /rememberKnownAccount\(\{ id: profile\.login_id, name: profile\.name, role: profile\.role \}\)/.test(read('js/app.js')));
 check('html: the switch screen and its list exist', /id="loginScreenSwitch"/.test(read('index.html')) && /id="switchAccountList"/.test(read('index.html')));

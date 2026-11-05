@@ -256,17 +256,17 @@ function setupAuthBandAndDropdown(){
     openFloatingTimer();
   });
   document.getElementById('logoutBtn').addEventListener('click', async () => {
-    const clearing=globalThis.M4L_V110?.clearAll('logout').catch(()=>{});
     clearToken();
+    const clearing=globalThis.M4L_V110?.clearAll('logout').catch(()=>{});
     await clearing;location.reload();
   });
   // V3.77.0 (j): log out, then land on the switcher instead of the PIN
   // screen for the account just left. The token goes first — the switcher
   // never carries a session across accounts.
   document.getElementById('switchAccountBtn').addEventListener('click', async () => {
-    const clearing=globalThis.M4L_V110?.clearAll('switch').catch(()=>{});
     clearToken();
     requestAccountSwitch();
+    const clearing=globalThis.M4L_V110?.clearAll('switch').catch(()=>{});
     await clearing;location.reload();
   });
   document.getElementById('refreshBtn').addEventListener('click', () => {
