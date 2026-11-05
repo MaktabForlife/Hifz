@@ -5,7 +5,7 @@ const API_ACTIONS=new Set(['logout','switch','known-cancellation']);
 const deny=()=>{throw new DOMException('Verify your Academy session before opening private information.','AbortError');};
 // Installed only by an explicit feature configuration. This gate never maps
 // legacy verifiedAt/profile/token timestamps into V110 foreground/session clocks.
-export function installAppPrivacy({win,doc,app,origins,verifySession,onClear=()=>{},onReady=()=>{},channelFactory,clock,setTimer,cancelTimer}){
+export function installAppPrivacy({win,doc,app,origins,verifySession,onClear=()=>{},onReady=()=>{},channelFactory,clock,setTimer,cancelTimer,controlClientFactory=createBrowserControlClient}){
  origins=browserOrigins(origins);
  if(win.location.origin!==origins[app]||typeof verifySession!=='function')throw Error('INVALID_APP_PRIVACY_CONFIG');
  let generation=0,context=null,verifiedBinding=null,brokerRevision=null,readiness=null,closed=false,signInIntent=null,everRevealed=false,needsNativeReset=false;
@@ -20,13 +20,13 @@ export function installAppPrivacy({win,doc,app,origins,verifySession,onClear=()=
   for(const url of urls)URL.revokeObjectURL(url);urls.clear();
  };
  const clear=reason=>{
-  generation++;context=null;verifiedBinding=null;brokerRevision=null;if(everRevealed)needsNativeReset=true;mask();
+  generation++;signInIntent=null;context=null;verifiedBinding=null;brokerRevision=null;if(everRevealed)needsNativeReset=true;mask();
   for(const controller of controllers)controller.abort();controllers.clear();
   onClear(reason);
   win.dispatchEvent(new CustomEvent('uaa-v110-private-cleared',{detail:{app,reason}}));
  };
  const invalidate=()=>{cache?.clear('known-cancellation');if(needsNativeReset)queueMicrotask(()=>win.location.reload());};
- broker=createBrowserControlClient({win,doc,app,origins,onInvalidate:invalidate});
+ broker=controlClientFactory({win,doc,app,origins,onInvalidate:invalidate});
  cache=createDisplayMemory({app,clock,setTimer,cancelTimer,channelFactory,onClear:clear,onState:state=>{
   // A ready context permits native data loading. Native account/render hooks
   // must still call reveal() after their checked bootstrap, never before.
@@ -97,15 +97,31 @@ export function installAppPrivacy({win,doc,app,origins,verifySession,onClear=()=
   },
   async beginMasterSignIn(){
    if(app!=='academy')throw Error('MASTER_ONLY');
-   cache.clear('switch',{broadcast:true});
-   const state=await broker.clear('switch');signInIntent={revision:state.revision,generation};return {...signInIntent};
+   if(closed)deny();
+   signInIntent=null;cache.clear('switch',{broadcast:true});
+   const operation={generation};signInIntent=operation;
+   try{
+    const state=await broker.clear('switch');
+    if(closed||signInIntent!==operation||generation!==operation.generation)deny();
+    const intent=Object.freeze({revision:state.revision,generation:operation.generation});
+    signInIntent=intent;return {...intent};
+   }catch(error){
+    // An older failure must not erase a newer pending/accepted operation.
+    if(signInIntent===operation)signInIntent=null;
+    throw error;
+   }
   },
   async completeMasterSignIn(intent,verifiedReply){
-   if(app!=='academy'||!signInIntent||intent?.revision!==signInIntent.revision||intent.generation!==signInIntent.generation||generation!==intent.generation||!validDisplaySession(verifiedReply?.session,'academy'))deny();
-   // This entrypoint is for the actual successful Academy credential/handover
-   // flow, not an ordinary refresh or a child-provided session DTO.
-   const session=verifiedReply.session,binding=await browserBinding(session);
-   await broker.establish({expectedRevision:intent.revision,binding,expiresAtMs:session.originalExpiresAtMs});
+   const operation=signInIntent,mine=generation;
+   const currentIntent=()=>{if(closed||!operation||typeof operation.revision!=='string'||signInIntent!==operation||generation!==mine||intent?.revision!==operation.revision||intent?.generation!==operation.generation||mine!==operation.generation)deny();};
+   if(app!=='academy'||!validDisplaySession(verifiedReply?.session,'academy'))deny();
+   currentIntent();
+   // Own the verified value across both asynchronous steps. Neither a late
+   // clear reply nor a late establishment reply can borrow a newer generation.
+   const session=structuredClone(verifiedReply.session),binding=await browserBinding(session);
+   currentIntent();
+   await broker.establish({expectedRevision:operation.revision,binding,expiresAtMs:session.originalExpiresAtMs});
+   currentIntent();
    signInIntent=null;return ready();
   },
   close(){if(closed)return;cache.close();closed=true;win.removeEventListener('pagehide',hide);win.removeEventListener('pageshow',resume);doc.removeEventListener('visibilitychange',visibility);broker.close();}
