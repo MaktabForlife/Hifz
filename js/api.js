@@ -117,6 +117,8 @@ function replaceUrlWithLoginId(id){
 // Every call surfaces real errors rather than returning something that
 // looks like empty/default data — callers must expect this to throw.
 async function apiFetch(path, options = {}){
+  if(window.M4L_V110&&!path.startsWith('/auth/')&&!await window.M4L_V110.ready())throw new DOMException('Current Academy sign-in is required.','AbortError');
+  const v110Generation=typeof v110HifzGeneration==='number'?v110HifzGeneration:0;
   const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
   const token = getToken();
   if(token) headers['Authorization'] = 'Bearer ' + token;
@@ -125,11 +127,12 @@ async function apiFetch(path, options = {}){
   try{
     response = await fetch(API_BASE + path, Object.assign({}, options, { headers }));
   } catch(e){
+    if(e?.name==='AbortError')throw e;
     throw new Error('Network error — check your connection.');
   }
 
   let body;
-  try{ body = await response.json(); } catch(e){ body = null; }
+  try{ body = await response.json(); } catch(e){ if(e?.name==='AbortError')throw e;body = null; }
 
   if(!response.ok){
     if(response.status === 401){ clearToken(); }
@@ -137,6 +140,7 @@ async function apiFetch(path, options = {}){
     if(body && body.code) err.code = body.code;   // V3.76.2: which rule refused, when the worker says
     throw err;
   }
+  if(window.M4L_V110&&v110Generation!==v110HifzGeneration)throw new DOMException('Your Hifz account changed.','AbortError');
   return body;
 }
 
@@ -383,3 +387,7 @@ function apiGetIslamicProposal(year){ return apiFetch('/maktab/calendar/islamic-
 function apiConfirmCalList(year, type, entries){ return apiFetch('/maktab/calendar/confirm', { method: 'POST', body: JSON.stringify({ year, type, entries }) }); }
 
 function apiGetMaktabAttendanceReport(from, to){ return apiFetch('/maktab/attendance-register?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to)); }
+
+// Private context loss invalidates any response begun for the old native user.
+let v110HifzGeneration=0;
+window.addEventListener('uaa-v110-private-cleared',()=>{v110HifzGeneration++;});

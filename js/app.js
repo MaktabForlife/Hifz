@@ -150,6 +150,7 @@ function homeScreenFor(){
 }
 
 async function bootApp(){
+  if(window.M4L_V110&&!await window.M4L_V110.ready())return;
   showAppShell();
   try{
     const profile = await apiGetProfile();
@@ -183,6 +184,7 @@ async function bootApp(){
     // V3.77.0 (j): this account is now one the device knows, for the switcher.
     rememberKnownAccount({ id: profile.login_id, name: profile.name, role: profile.role });
     currentUser = { id: profile.id, loginId: profile.login_id, academyManaged: !!(profile.academy_managed || profile.academy_profiles_only), name: profile.name || '', role: profile.role || 'student', trackHaidh: !!profile.track_haidh };
+    if(window.M4L_V110)await window.M4L_V110.reveal(profile.id);
     setupAuthBandAndDropdown(); // must run AFTER currentUser.role is known — it renders the nav based on it
     renderAuthBand();
     showWelcome(currentUser.name || 'back');
