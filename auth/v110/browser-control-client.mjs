@@ -15,6 +15,10 @@ export function createBrowserControlClient({win,doc,app,origins,onInvalidate=()=
   const m=event.data;
   if(closed||event.origin!==origins.academy||event.source!==frame.contentWindow||!m||m.v!==1||m.nonce!==nonce)return;
   if(m.type==='UAA_CONTROL_CHANGED'){
+   // A frame's initial pageshow can notify before CONNECT replies. There is
+   // no adopted context yet: ignore that hint and require the subsequent
+   // READ/ASSERT round trips. A notification never establishes a baseline.
+   if(!connected&&knownRevision===null)return;
    // Never accept a broadcast as permission to reveal or adopt a new identity.
    if(m.state&&validBrowserState(m.state)&&m.state.revision===knownRevision)return;
    invalidate();return;
