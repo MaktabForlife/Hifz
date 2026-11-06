@@ -45,7 +45,7 @@ export async function readDisplayContext(request,env,{app,clock=()=>Math.floor(D
   // Academy/Hifz native IDs may differ. Shared browser correlation uses only
   // parent/browser bindings; no alias is reinterpreted as a journal owner.
   const session={app,accountId:claims.sub,sessionId:claims.sid,parentId:claims.psid,browserId:claims.bsid,browserGeneration:claims.bv,credentialEpoch:claims.ce,securityVersion:claims.pv,unlockGeneration:claims.ue,originalSignedAtMs:claims.s_iat*1000,originalExpiresAtMs:claims.s_exp*1000,lastForegroundRefreshMs:row.last_fg_refresh_s*1000,serverNowMs:now*1000};
-  return reply({session,initialViews:[]});
+  return reply({session,initialViews:[],accessExpiresAtMs:claims.exp*1000});
  }catch(error){
   const code=error instanceof AuthContractError?error.code:'CONTEXT_UNAVAILABLE';
   if(['PIN_REQUIRED','TOKEN_UPDATE_REQUIRED'].includes(code))return reply({code},401);
