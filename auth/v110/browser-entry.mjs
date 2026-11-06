@@ -14,7 +14,8 @@ export function installNativePrivacy({win,doc,config,nativeFetch}){
   studio:new Set(['/auth/login','/auth/exchange','/auth/logout','/api/config']),
   hifz:new Set(['/auth/academy','/auth/lookup','/auth/policy'])
  }[app];
- const privateURL=url=>apiOrigins.has(url.origin)&&url.href!==contextURL&&!publicPaths.has(url.pathname)&&
+ const publicAcademyRead=(url,method)=>app==='academy'&&['GET','HEAD'].includes(method)&&['/api/public/header-date','/api/public/academy-announcements','/api/public/academy-announcements/image','/api/public/academy-announcements/pdf','/api/academy/header-date'].includes(url.pathname);
+ const privateURL=(url,method)=>!publicAcademyRead(url,method)&&apiOrigins.has(url.origin)&&url.href!==contextURL&&!publicPaths.has(url.pathname)&&
   (app==='hifz'?!url.pathname.startsWith('/auth/'):url.pathname.startsWith('/api/')||url.pathname.startsWith('/auth/'));
  const runtime=installAppPrivacy({win,doc,app,origins,verifySession:async({signal})=>{
   const response=await nativeFetch(contextURL,{credentials:'same-origin',cache:'no-store',signal});
@@ -35,7 +36,7 @@ export function installNativePrivacy({win,doc,config,nativeFetch}){
   const url=new URL(typeof input==='string'||input instanceof URL?String(input):input.url,win.location.href);
   if(app!=='academy'&&apiOrigins.has(url.origin)&&['/auth/login','/auth/register'].includes(url.pathname))throw Error('ACADEMY_SIGNIN_REQUIRED');
   if(url.href===contextURL)throw Error('CONTEXT_ROUTE_IS_PRIVATE_TO_ADAPTER');
-  if(!privateURL(url))return nativeFetch(input,options);
+  if(!privateURL(url,String(options.method||input?.method||'GET').toUpperCase()))return nativeFetch(input,options);
   if(!await runtime.ready())throw new DOMException('Current Academy sign-in is required.','AbortError');
   const stamp=await runtime.capture(),controller=new AbortController(),upstream=options.signal||input?.signal;
   const abort=()=>controller.abort();if(upstream?.aborted)controller.abort();else upstream?.addEventListener?.('abort',abort,{once:true});
