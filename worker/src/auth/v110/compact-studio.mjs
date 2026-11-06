@@ -38,8 +38,8 @@ async function identitySnapshot(db,family,fp,now){
  if(!row||row.native_account_id!==row.account_id||familyTuple.some(key=>row[key]!==family[key]))fail('SESSION_ENDED');
  return {row,metrics:{statements:1,rowsRead:result.meta?.rows_read||0,rowsWritten:result.meta?.rows_written||0}};
 }
-export async function createAccountBoundCompactStudioRefresh({binding,clock=()=>Math.floor(Date.now()/1000),...config}){
- if(config.app!=='studio'||!binding?.withSession||typeof clock!=='function')fail('INVALID_CONFIG');
+export async function createAccountBoundCompactStudioRefresh({binding,clock=()=>Math.floor(Date.now()/1000),authorizeRotation,...config}){
+ if(config.app!=='studio'||!binding?.withSession||typeof clock!=='function'||authorizeRotation!==undefined&&typeof authorizeRotation!=='function')fail('INVALID_CONFIG');
  const engine=await createStudioCompactEngine(config);
  return Object.freeze({
   async refreshAndIssue(raw,options={}){
@@ -55,6 +55,9 @@ export async function createAccountBoundCompactStudioRefresh({binding,clock=()=>
       selectedFamily??={...family};
       const current=await identitySnapshot(binding.withSession('first-primary'),family,oldFingerprint,preparedAt);
       for(const key of Object.keys(identityRead))identityRead[key]+=current.metrics[key];
+      // The native HTTP adapter checks its session-bound request proof against
+      // this exact current family before signing, rotating or auditing.
+      if(authorizeRotation)await authorizeRotation({family:current.row,now:preparedAt});
       // Every fallible identity read, compact claim validation/signing and initial
       // capacity check completes while the browser's old refresh is current.
       const issued=await engine.issue(currentClaims(current.row),preparedAt);
