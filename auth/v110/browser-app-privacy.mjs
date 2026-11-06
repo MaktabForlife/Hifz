@@ -85,6 +85,14 @@ export function installAppPrivacy({win,doc,app,origins,verifySession,onClear=()=
    doc.documentElement.classList.remove('uaa-v110-masked');doc.documentElement.dataset.uaaV110State='ready';
    onReady();return stamp;
   },
+  async acceptOwnRefresh(reply,started){
+   if(!validDisplaySession(reply?.session,app)||!context||closed)deny();
+   const stamp=await capture(),next=structuredClone(reply.session);
+   if(await browserBinding(next)!==verifiedBinding){cache.clear('context-mismatch');deny();}
+   await current(stamp);
+   if(!cache.acceptOwnRefresh(next,started))deny();
+   context=next;return true;
+  },
   async guard(promise,stamp){const value=await promise;await current(stamp);return value;},
   trackURL(url){if(typeof url!=='string'||!url.startsWith('blob:'))throw Error('INVALID_PRIVATE_URL');urls.add(url);return url;},
   trackController(controller){if(!controller?.abort)throw Error('INVALID_PRIVATE_REQUEST');controllers.add(controller);return ()=>controllers.delete(controller);},

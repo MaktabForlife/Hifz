@@ -25,13 +25,13 @@ function validView(view){
 }
 export function createDisplayMemory({app,verifySession,onState=()=>{},onClear=()=>{},clock=()=>performance.now(),setTimer=(fn,ms)=>setTimeout(fn,ms),cancelTimer=id=>clearTimeout(id),channelFactory,maxEntries=8,maxViewBytes=256000}){
  if(!APPS.has(app)||typeof verifySession!=='function'||typeof clock!=='function'||!Number.isSafeInteger(maxEntries)||maxEntries<1||!Number.isSafeInteger(maxViewBytes)||maxViewBytes<1)throw Error('INVALID_DISPLAY_CONFIG');
- let epoch=0,phase='masked',reason='resume',session=null,deadline=0,timer=null,closed=false;
+ let epoch=0,phase='masked',reason='resume',session=null,deadline=0,absoluteDeadline=0,timer=null,timerSerial=0,closed=false;
  const views=new Map(),pending=new Set(),unbind=new Set(),serials=new Map();let visible=()=>true;
  const channel=channelFactory?.('uaa-display-memory-v1-'+app);
  const report=()=>Object.freeze({app,phase,reason,epoch,entryCount:views.size,hasSession:Boolean(session),remainingMs:phase==='ready'?Math.max(0,deadline-clock()):0});
  function clear(why='manual',{broadcast=false}={}){
   if(closed)return;
-  reason=reasons.has(why)?why:'manual';phase='masked';epoch++;session=null;deadline=0;views.clear();serials.clear();
+  reason=reasons.has(why)?why:'manual';phase='masked';epoch++;session=null;deadline=0;absoluteDeadline=0;timerSerial++;views.clear();serials.clear();
   if(timer!==null){cancelTimer(timer);timer=null;}
   for(const controller of pending)controller.abort();pending.clear();
   // Internal state and pending loads are invalidated BEFORE rendering hooks.
@@ -45,10 +45,10 @@ export function createDisplayMemory({app,verifySession,onState=()=>{},onClear=()
   return !closed&&phase==='ready';
  }
  function armExpiry(){
-  const mine=epoch;
+  const mine=epoch,serial=++timerSerial;
   timer=setTimer(()=>{
    // A cancelled/dequeued older callback must not alter a newer timer.
-   if(closed||mine!==epoch||phase!=='ready')return;
+   if(closed||mine!==epoch||serial!==timerSerial||phase!=='ready')return;
    timer=null;
    // Timer scheduling can be early. Keep the original deadline and re-arm
    // until it has actually been reached, without waiting for a cache API call.
@@ -89,7 +89,7 @@ export function createDisplayMemory({app,verifySession,onState=()=>{},onClear=()
    // the local privacy deadline. Server authorization stays authoritative.
    const until=started+remaining;
    if(remaining<=0||clock()>=until){clear('lock');return false;}
-   session=copy(current);deadline=until;phase='ready';reason=why;
+   session=copy(current);absoluteDeadline=started+current.originalExpiresAtMs-current.serverNowMs;deadline=until;phase='ready';reason=why;
    for(const entry of reply.initialViews||[]){
     if(!exact(entry,['key','context','view'])||!envelope({context:entry.context,view:entry.view}))throw Error('INVALID_INITIAL_DISPLAY');
     save(entry.key,entry.view);
@@ -99,6 +99,16 @@ export function createDisplayMemory({app,verifySession,onState=()=>{},onClear=()
   }catch{
    pending.delete(controller);if(!closed&&mine===epoch)clear('verification-failed');return false;
   }
+ }
+ function acceptOwnRefresh(next,started){
+  if(!check()||!visible())return false;
+  if(!validDisplaySession(next,app)||identity(next)!==identity(session)||!Number.isFinite(started)||started<0||started>clock()||next.serverNowMs<session.serverNowMs||next.lastForegroundRefreshMs<session.lastForegroundRefreshMs){clear('context-mismatch',{broadcast:true});return false;}
+  let until=Math.min(absoluteDeadline,started+Math.min(next.originalExpiresAtMs,next.lastForegroundRefreshMs+IDLE)-next.serverNowMs);
+  // Background replacement cannot extend the existing local privacy deadline.
+  if(next.lastForegroundRefreshMs===session.lastForegroundRefreshMs)until=Math.min(deadline,until);
+  if(clock()>=until){clear('lock',{broadcast:true});return false;}
+  if(timer!==null)cancelTimer(timer);timer=null;
+  session=copy(next);deadline=until;armExpiry();return true;
  }
  async function load(key,loader,{force=false}={}){
   if(typeof key!=='string'||!ID.test(key))throw Error('INVALID_DISPLAY_KEY');
@@ -128,7 +138,7 @@ export function createDisplayMemory({app,verifySession,onState=()=>{},onClear=()
   unbind.add(remove);if(!visible())clear('hidden');return remove;
  }
  return Object.freeze({
-  recheck,load,clear,bindLifecycle,
+  recheck,load,clear,bindLifecycle,acceptOwnRefresh,
   peek(key){return check()&&views.has(key)?copy(views.get(key)):null;},
   state(){check();return report();},
   close(){if(closed)return;try{clear('closed');}finally{closed=true;for(const remove of [...unbind])remove();if(channel?.removeEventListener)channel.removeEventListener('message',listener);channel?.close?.();}}

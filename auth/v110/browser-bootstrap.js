@@ -38,6 +38,7 @@
   reveal:accountId=>call('reveal',accountId),
   clear(reason){root.classList.add('uaa-v110-masked');return call('clear',reason);},
   clearAll(reason){root.classList.add('uaa-v110-masked');return call('clearAll',reason);},
+  acceptOwnRefresh:(reply,started)=>call('acceptOwnRefresh',reply,started),
   beginMasterSignIn:()=>call('beginMasterSignIn'),completeMasterSignIn:(intent,reply)=>call('completeMasterSignIn',intent,reply)
  });
  starting.catch(()=>{root.dataset.uaaV110State='unverifiable';});
