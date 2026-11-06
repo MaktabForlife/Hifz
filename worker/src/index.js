@@ -1,3 +1,4 @@
+import {handleHifzRefresh} from './auth/v110/hifz-refresh-http.mjs';
 import {readDisplayContext} from './auth/v110/server-context.mjs';
 /* Hifzhelper build 5.1 | worker/src/index.js */
 import { json, error } from './utils.js';
@@ -38,6 +39,7 @@ function respond(result) {
 
 export default {
   async fetch(request, env, ctx) {
+    if(['/auth/v110/csrf','/auth/v110/refresh'].includes(new URL(request.url).pathname))return handleHifzRefresh(request,env);
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         headers: {
