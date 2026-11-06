@@ -1,6 +1,6 @@
-// Independent COMPACT Studio issuance proof; no live route imports this.
-// Uses only reads of native business tables. JWT metadata here is synthetic;
-// production binding/mutation integration remains gated by the live DB hold.
+// Compact Studio issuance used by its default-disabled native refresh transport.
+// Native business data stays local. JWT metadata, writers, hosted bindings and
+// activation require their separate reviewed setup.
 import {AuthContractError,createConfiguredAccessEngine} from './claims.mjs';
 import {createPrototypeStore} from './store.mjs';
 const fail=code=>{throw new AuthContractError(code);};

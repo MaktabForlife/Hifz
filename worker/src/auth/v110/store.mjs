@@ -1,4 +1,5 @@
-// Independent D1 prototype; no production database binding or route is changed.
+// Shared prepared rotation for default-disabled native V110 transports.
+// Schema installation, native writers and activation are separate gates.
 import {base64url} from 'jose';
 import {AuthContractError,IDLE_SECONDS} from './claims.mjs';
 const integer=v=>Number.isSafeInteger(v)&&v>=0;
