@@ -1,0 +1,10 @@
+import {schemaSQL} from './schema.mjs';
+import {ceremonySchemaSQL} from './ceremonies.mjs';
+import {snapshotSchemaSQL} from './snapshot.mjs';
+import {policySchemaSQL} from './policy.mjs';
+import {recoverySchemaSQL} from './recovery.mjs';
+import {outboxSchemaSQL} from './outbox.mjs';
+import {issuanceFloorSchemaSQL} from './issuance-floors.mjs';
+import {controlPublicationSchemaSQL} from './control-publication.mjs';
+export const schemaRecipes=Object.freeze({owning:schemaSQL,ceremonies:ceremonySchemaSQL,reconciliation:snapshotSchemaSQL,policy:policySchemaSQL,recovery:recoverySchemaSQL,outbox:outboxSchemaSQL,issuanceFloors:issuanceFloorSchemaSQL,controlPublications:controlPublicationSchemaSQL});
+export const additiveSchemaSQL=Object.values(schemaRecipes).join('\n');
