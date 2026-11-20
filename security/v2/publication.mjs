@@ -79,16 +79,18 @@ export async function worksetApplied(store,workId){
  const work=await store.first('SELECT * FROM jwt_v2_worksets WHERE work_id=?',workId);requireThat(work,'PUBLICATION_WORK_UNKNOWN',409);
  await store.stmt("UPDATE jwt_v2_worksets SET state='APPLIED' WHERE work_id=?",workId).run();return true;
 }
-export function admissionFloorGuard(store,binding){
+export function admissionFloorCondition(binding){
  // Every newly created/renewed SID is checked against durable restrictions, including after the workset watermark.
- return store.guard("SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM jwt_v2_restrictions r WHERE "+
+ return {sql:"SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM jwt_v2_restrictions r WHERE "+
  "(json_extract(r.target_json,'$.type')='accountCutoff' AND json_extract(r.target_json,'$.sub')=? AND (?<json_extract(r.target_json,'$.maxCe') OR (?=json_extract(r.target_json,'$.maxCe') AND ?<=json_extract(r.target_json,'$.maxAe')))) OR "+
  "(json_extract(r.target_json,'$.type')='credentialEpoch' AND json_extract(r.target_json,'$.sub')=? AND ?<json_extract(r.target_json,'$.newCe')) OR "+
  "(json_extract(r.target_json,'$.type')='browser' AND json_extract(r.target_json,'$.bsid')=? AND ?<=json_extract(r.target_json,'$.maxBv')) OR "+
  "(json_extract(r.target_json,'$.type')='localEpoch' AND json_extract(r.target_json,'$.sub')=? AND json_extract(r.target_json,'$.ce')=? AND json_extract(r.target_json,'$.ae')=? AND ?<=json_extract(r.target_json,'$.maxLe')) OR "+
  "(json_extract(r.target_json,'$.type')='parent' AND json_extract(r.target_json,'$.psid')=? AND json_extract(r.target_json,'$.bsid')=? AND json_extract(r.target_json,'$.bv')=? AND json_extract(r.target_json,'$.ce')=? AND json_extract(r.target_json,'$.ae')=?))",
- [binding.sub,binding.ce,binding.ce,binding.ae,binding.sub,binding.ce,binding.bsid,binding.bv,binding.sub,binding.ce,binding.ae,binding.le,binding.psid,binding.bsid,binding.bv,binding.ce,binding.ae]);
+ args:[binding.sub,binding.ce,binding.ce,binding.ae,binding.sub,binding.ce,binding.bsid,binding.bv,binding.sub,binding.ce,binding.ae,binding.le,binding.psid,binding.bsid,binding.bv,binding.ce,binding.ae]};
 }
+
+export function admissionFloorGuard(store,binding){const p=admissionFloorCondition(binding);return store.guard(p.sql,p.args);}
 
 export async function markControlCovered(store,{workId,controlKey,projection}){
  const row=await store.first('SELECT * FROM jwt_v2_control_publications WHERE work_id=? AND object_key=?',workId,controlKey),life=await store.lifecycle(controlKey);

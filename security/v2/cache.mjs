@@ -137,8 +137,8 @@ export class SecurityCache {
   if(!rights||typeof rights!=='object'||verifiedPayloads.get(rights)!==memoKey)rights=null;
   if(!rights){
    requireThat(typeof session.rightsKey==='string'&&session.rightsKey.startsWith(this.prefix+'rights/')&&/^[0-9a-f]{64}$/.test(session.rightsHash),'INVALID_RIGHTS_REFERENCE',503);
-   this.metrics.payloadReads++;const object=await this.bucket.get(session.rightsKey);requireThat(object&&object.size<=2*1024*1024,'RIGHTS_PAYLOAD_UNAVAILABLE',503);
-   const raw=new Uint8Array(await object.arrayBuffer());requireThat(equal(hex(await sha256(raw)),session.rightsHash),'RIGHTS_PAYLOAD_CORRUPT',503);
+   this.metrics.payloadReads++;let object,raw;try{object=await this.bucket.get(session.rightsKey);}catch{reject('RIGHTS_PAYLOAD_TRANSPORT_UNAVAILABLE',503);}requireThat(object&&object.size<=2*1024*1024,'RIGHTS_PAYLOAD_UNAVAILABLE',503);
+   try{raw=new Uint8Array(await object.arrayBuffer());}catch{reject('RIGHTS_PAYLOAD_TRANSPORT_UNAVAILABLE',503);}requireThat(equal(hex(await sha256(raw)),session.rightsHash),'RIGHTS_PAYLOAD_CORRUPT',503);
    rights=immutable(strictJSON(raw,{maxBytes:2*1024*1024}));requireThat(rights&&typeof rights==='object','INVALID_RIGHTS_PAYLOAD',503);verifiedPayloads.set(rights,memoKey);rightsMemo.set(memoKey,rights);
   }
   // Memoised bytes do not confer a lease: controls and deadlines were checked above on every request.

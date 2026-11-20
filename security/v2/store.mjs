@@ -4,11 +4,13 @@ import {issuanceFloorGuard} from './issuance-floors.mjs';
 import {admissionFloorGuard,restrictionPlan} from './publication.mjs';
 import {requireThat,reject,canonical,digest,equal,safeInt} from './codec.mjs';
 export class PrimaryStore {
- constructor(db,{app,env,academyFence=app==='academy',dependencyManifest,dependencyRegistry=new Map(),securityPrefix}){requireThat(['academy','studio','hifz'].includes(app)&&['production','feature'].includes(env),'INVALID_STORE_OWNER',503);this.app=app;this.env=env;this.academyFence=academyFence;this.dependencyManifest=dependencyManifest;this.dependencyRegistry=dependencyRegistry;this.securityPrefix=securityPrefix;this.db=db.withSession('first-primary');}
+ constructor(db,{app,env,academyFence=app==='academy',dependencyManifest,dependencyRegistry=new Map(),securityPrefix}){requireThat(['academy','studio','hifz'].includes(app)&&['production','feature'].includes(env),'INVALID_STORE_OWNER',503);this.app=app;this.env=env;this.academyFence=academyFence;this.dependencyManifest=dependencyManifest;this.dependencyRegistry=dependencyRegistry;this.securityPrefix=securityPrefix;this.owningDB=db;this.db=db.withSession('first-primary');}
  controlKey(suffix){requireThat(typeof this.securityPrefix==='string'&&this.securityPrefix.startsWith('auth-private/v2/'+this.env+'/'+this.app+'/')&&this.securityPrefix.endsWith('/'),'SECURITY_NAMESPACE_NOT_CONFIGURED',503);return this.securityPrefix+suffix;}
  stmt(sql,...args){return this.db.prepare(sql).bind(...args);}
- first(sql,...args){return this.stmt(sql,...args).first();}
- all(sql,...args){return this.stmt(sql,...args).all().then(r=>r.results);}
+ // first-primary applies only to a session's first query. Runtime instances
+ // outlive one request, so authority reads must not reuse their old read session.
+ first(sql,...args){return this.owningDB.withSession('first-primary').prepare(sql).bind(...args).first();}
+ all(sql,...args){return this.owningDB.withSession('first-primary').prepare(sql).bind(...args).all().then(r=>r.results);}
  batch(items){return this.db.batch(this.academyFence?[this.stmt("INSERT INTO jwt_v2_guards(id,accepted) SELECT 'native-split-fence',NOT EXISTS(SELECT 1 FROM split_write_fence) ON CONFLICT(id) DO UPDATE SET accepted=excluded.accepted"),...items,this.stmt("DELETE FROM jwt_v2_guards WHERE id='native-split-fence'")]:items);}
  guard(sql,args=[]){const id=crypto.randomUUID();return [this.stmt('INSERT INTO jwt_v2_guards(id,accepted) SELECT ?,EXISTS('+sql+')',id,...args),this.stmt('DELETE FROM jwt_v2_guards WHERE id=?',id)];}
  async claimSeed({key,incarnation,generation,nonce}){
@@ -27,7 +29,7 @@ export class PrimaryStore {
   await this.batch([g,this.stmt("UPDATE jwt_v2_objects SET state='ACTIVE',semantic_revision=?,receipt_json=? WHERE object_key=?",revision,canonical(receipt),key),clear]);
  }
  family(sid){return this.first('SELECT * FROM jwt_v2_families WHERE sid=?',sid);}
- async createFamily(family){
+ async createFamily(family,{before=[],after=[]}={}){
   const f=family,c=f.binding,projection=canonical(f.projection),binding=canonical(c),state=f.state||'UNLOCKED';
   requireThat(['UNLOCKED','ADMITTED_LOCKED'].includes(state),'INVALID_INITIAL_STATE',409);
   requireThat(c.ver===2&&c.env===this.env&&c.aud==='urn:uaa:'+this.env+':'+this.app+':api:v2','WRONG_FAMILY_NAMESPACE',409);
@@ -40,7 +42,7 @@ export class PrimaryStore {
   const [floor,floorClear]=admissionFloorGuard(this,c);
   const issuance=state==='UNLOCKED'?issuanceFloorGuard(this,{binding:c,projection:f.projection,vectorGuards:f.vectorGuards,state,now:f.now}):[null,null];
   const policyPlan=familyPolicyRegistrationPlan(this,{sid:c.sid,ownerEpoch:f.projection.policyEpoch,revision:f.projection.policyRevision,minutes:f.policyMinutes,now:f.now});
-  await this.batch([g,floor,...(issuance[0]?[issuance[0]]:[]),...vectorChecks.map(x=>x[0]),this.stmt("INSERT INTO jwt_v2_families(sid,sub,psid,bsid,bv,ce,ae,le,sv,ue,cr,state,s_iat,s_exp,vat,deadline,idle_until,last_refresh,policy_minutes,fingerprint,fingerprint_generation,binding_json,projection_json,authority_ready) VALUES(?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,1,?,?,?)",c.sid,c.sub,c.psid,c.bsid,c.bv,c.ce,c.ae,c.le,c.sv,c.ue,f.state||'UNLOCKED',c.s_iat,c.s_exp,c.vat,f.deadline,f.idleUntil,f.lastRefresh??f.now,f.policyMinutes,f.fingerprint,binding,projection,Number(state==='UNLOCKED')),...policyPlan,...vectorChecks.map(x=>x[1]),...(issuance[1]?[issuance[1]]:[]),floorClear,clear]);
+  await this.batch([...before,g,floor,...(issuance[0]?[issuance[0]]:[]),...vectorChecks.map(x=>x[0]),this.stmt("INSERT INTO jwt_v2_families(sid,sub,psid,bsid,bv,ce,ae,le,sv,ue,cr,state,s_iat,s_exp,vat,deadline,idle_until,last_refresh,policy_minutes,fingerprint,fingerprint_generation,binding_json,projection_json,authority_ready) VALUES(?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,1,?,?,?)",c.sid,c.sub,c.psid,c.bsid,c.bv,c.ce,c.ae,c.le,c.sv,c.ue,f.state||'UNLOCKED',c.s_iat,c.s_exp,c.vat,f.deadline,f.idleUntil,f.lastRefresh??f.now,f.policyMinutes,f.fingerprint,binding,projection,Number(state==='UNLOCKED')),...policyPlan,...vectorChecks.map(x=>x[1]),...(issuance[1]?[issuance[1]]:[]),floorClear,clear,...after]);
  }
  async intent({sid,csrfHash,now,kind='refresh'}){
   const f=await this.family(sid);requireThat(f&&f.s_exp>now,'SESSION_ENDED');
@@ -55,7 +57,7 @@ export class PrimaryStore {
   requireThat(['REVOKED','EXPIRED','LOCKED'].includes(state),'INVALID_TRANSITION',400);
   await this.batch([this.stmt("UPDATE jwt_v2_families SET state=?,cr=cr+1 WHERE sid=? AND state NOT IN('REVOKED','EXPIRED')",state,sid),this.stmt("UPDATE jwt_v2_intents SET state='CANCELLED',superseding_operation=? WHERE sid=? AND state='ISSUED'",operationId,sid)]);
  }
- async rotate({sid,fingerprint,intentId,csrfHash,expectedBinding,successorFingerprint,nextBinding,nextProjection,now,idleUntil,deadline,vectorGuards,qualifyingActivity,capture}){
+ async rotate({sid,fingerprint,intentId,csrfHash,expectedBinding,successorFingerprint,nextBinding,nextProjection,now,idleUntil,deadline,vectorGuards,qualifyingActivity,capture,requireBarrier=false}){
   requireThat(typeof qualifyingActivity==='boolean','ACTIVITY_CLASSIFICATION_REQUIRED',400);
   requireThat(Array.isArray(vectorGuards)&&vectorGuards.length>0,'AUTHORITATIVE_VECTOR_REQUIRED',503);
   const f=await this.family(sid);requireThat(f,'SESSION_ENDED');
@@ -76,12 +78,15 @@ export class PrimaryStore {
   const guards=vectorGuards.map(([id,scope,epoch,revision])=>this.guard("SELECT 1 FROM jwt_v2_dependencies WHERE id=? AND scope=? AND owner_epoch=? AND revision=?",[id,scope,epoch,revision]));
   const [floor,floorClear]=admissionFloorGuard(this,expectedBinding);
   const [issuance,issuanceClear]=issuanceFloorGuard(this,{binding:nextBinding,projection:nextProjection,vectorGuards,existingSid:sid,now});
-  const items=[g,floor,issuance,...guards.map(x=>x[0]),
+  const barrierGuard=requireBarrier?this.guard("SELECT 1 FROM jwt_v2_ceremony_barriers WHERE psid=? AND bsid=? AND bv=? AND sub=? AND locked=0 AND idle_until>?",[f.psid,f.bsid,f.bv,f.sub,now]):[null,null];
+  const items=[g,floor,issuance,...(barrierGuard[0]?[barrierGuard[0]]:[]),...guards.map(x=>x[0]),
    this.stmt('INSERT INTO jwt_v2_refresh_history(fingerprint,sid,generation,binding_json,csrf_hash,complete,spent_at,intent_id,s_exp) VALUES(?,?,?,?,?,1,?,?,?)',fingerprint,sid,f.fingerprint_generation,original,csrfHash,now,intentId,f.s_exp),
    this.stmt("UPDATE jwt_v2_families SET fingerprint=?,fingerprint_generation=fingerprint_generation+1,authority_ready=1,sv=sv+1,cr=cr+1,vat=?,deadline=?,idle_until=?,last_refresh=?,binding_json=?,projection_json=? WHERE sid=?",successorFingerprint,nextBinding.vat,deadline,idleUntil,qualifyingActivity?now:f.last_refresh,canonical(nextBinding),canonical(nextProjection),sid),
+   ...(this.app==='academy'&&qualifyingActivity?[this.stmt("UPDATE jwt_v2_parents SET foreground_at=? WHERE psid=? AND sub=? AND bsid=? AND bv=? AND ce=? AND ae=? AND state='UNLOCKED'",now,f.psid,f.sub,f.bsid,f.bv,f.ce,f.ae)]:[]),
+   this.stmt('INSERT INTO jwt_v2_ceremony_barriers VALUES(?,?,?,?,?,?,0,1) ON CONFLICT(psid,bsid,bv,sub) DO UPDATE SET last_refresh=excluded.last_refresh,idle_until=excluded.idle_until,revision=revision+1',f.psid,f.bsid,f.bv,f.sub,qualifyingActivity?now:f.last_refresh,idleUntil),
    this.stmt("UPDATE jwt_v2_intents SET state=CASE WHEN intent_id=? THEN 'COMMITTED' ELSE 'SUPERSEDED' END,result_json=?,superseding_operation=? WHERE sid=? AND state='ISSUED'",intentId,canonical(result),intentId,sid),
    this.stmt("INSERT INTO jwt_v2_operations VALUES(?,?, 'refresh',?,?,?)",intentId,f.sub,await digest({fingerprint,intentId,binding:expectedBinding}),canonical(result),now),
-   ...guards.map(x=>x[1]),issuanceClear,floorClear,clear];
+   ...guards.map(x=>x[1]),...(barrierGuard[1]?[barrierGuard[1]]:[]),issuanceClear,floorClear,clear];
   try{await this.batch(items);return {winner:true,result,cookies:true};}
   catch(error){const winner=await this.first('SELECT state FROM jwt_v2_intents WHERE intent_id=?',intentId);if(winner?.state!=='ISSUED')return {winner:false,code:'REFRESH_SUPERSEDED',cookies:false};throw error;}
  }
@@ -124,6 +129,7 @@ export class PrimaryStore {
    this.stmt('INSERT INTO jwt_v2_cutoffs VALUES(?,?,?,?,?)',sub,ce,ae,operationId,canonical(cutoff)),
    this.stmt('INSERT INTO jwt_v2_operations VALUES(?,?,?,?,?,?)',operationId,sub,kind,requestDigest,canonical(result),now),
    ...localWork,
+   this.stmt("UPDATE jwt_v2_http_transactions SET status='CANCELLED' WHERE sub=? AND status='PENDING'",sub),
    this.stmt("UPDATE jwt_v2_parents SET state='REVOKED' WHERE sub=? AND (ce<? OR (ce=? AND ae<=?))",sub,ce,ce,ae),
    this.stmt("UPDATE jwt_v2_ceremonies SET status='CANCELLED' WHERE sub=? AND status IN('PENDING','CODE_ISSUED','GRANTED')",sub),
    this.stmt("UPDATE jwt_v2_ceremony_attempts SET status='CANCELLED' WHERE sub=? AND status IN('ISSUED','RESERVED')",sub),

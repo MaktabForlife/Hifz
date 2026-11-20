@@ -9,7 +9,9 @@
 // hostname uses production; the original development Pages host stays isolated.
 // A storage privacy restriction must not make a development hostname use production.
 // The existing manual override remains available for deliberate local development.
+const HIFZ_V2_ACTIVE = Boolean(globalThis.HifzV111?.active);
 const API_BASE = (() => {
+  if(HIFZ_V2_ACTIVE)return '';
   try {
     const override = localStorage.getItem('hh_api_base');
     if (override) return override;
@@ -38,9 +40,9 @@ const REMEMBERED_ID_KEY = 'hh_login_id';
 // tab/app actually closes, so reopening always requires signing in again.
 // Confirmed in chat (V3.4.1): the journal contents is valuable enough that
 // this is worth the tradeoff over a longer-lived persistent session.
-function getToken(){ return sessionStorage.getItem(TOKEN_KEY); }
-function setToken(t){ sessionStorage.setItem(TOKEN_KEY, t); }
-function clearToken(){ sessionStorage.removeItem(TOKEN_KEY); }
+function getToken(){ return HIFZ_V2_ACTIVE?Boolean(globalThis.HifzV111?.session?.getContext()):sessionStorage.getItem(TOKEN_KEY); }
+function setToken(t){ if(HIFZ_V2_ACTIVE)throw new Error('Native bearer sign-in is disabled.'); sessionStorage.setItem(TOKEN_KEY, t); }
+function clearToken(){ if(HIFZ_V2_ACTIVE){globalThis.HifzV111?.clear();return;}sessionStorage.removeItem(TOKEN_KEY); }
 
 // The account ID is safe to remember separately from the authenticated
 // session: it is already the non-secret part of each student's personal URL.
@@ -105,7 +107,7 @@ function getPathLoginId(pathname = location.pathname){
   return decoded;
 }
 function getEffectiveLoginId(pathname = location.pathname){
-  return getPathLoginId(pathname) || getRememberedLoginId();
+  return getPathLoginId(pathname) || (HIFZ_V2_ACTIVE?null:getRememberedLoginId());
 }
 
 function replaceUrlWithLoginId(id){
@@ -117,6 +119,7 @@ function replaceUrlWithLoginId(id){
 // Every call surfaces real errors rather than returning something that
 // looks like empty/default data — callers must expect this to throw.
 async function apiFetch(path, options = {}){
+  if(HIFZ_V2_ACTIVE){await globalThis.HifzV111.ready;return globalThis.HifzV111.client.request(path,options);}
   const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
   const token = getToken();
   if(token) headers['Authorization'] = 'Bearer ' + token;
@@ -141,6 +144,7 @@ async function apiFetch(path, options = {}){
 }
 
 async function apiLogin(id, pin, confirmPin){
+  if(HIFZ_V2_ACTIVE)throw Object.assign(new Error('Sign in through Academy.'),{code:'ACADEMY_PIN_REQUIRED'});
   const result = await apiFetch('/auth/login', { method: 'POST', body: JSON.stringify({ id, pin, ...(confirmPin !== undefined ? { confirmPin } : {}) }) });
   setToken(result.token);
   // Save the ID only after the server accepts the ID+PIN pair. Merely opening
@@ -170,7 +174,7 @@ function apiAuthPolicy(){
 function makeLogClient(path){
   return {
     get: (since) => apiFetch(path + (since ? '?since=' + encodeURIComponent(since) : '')),
-    getForDate: (date) => apiFetch(path + '?date=' + encodeURIComponent(date)).catch(() => []),
+    getForDate: (date) => HIFZ_V2_ACTIVE?apiFetch(path + '?date=' + encodeURIComponent(date)):apiFetch(path + '?date=' + encodeURIComponent(date)).catch(() => []),
     save: (entry) => apiFetch(path, { method: 'POST', body: JSON.stringify(entry) }),
     update: (id, fields) => apiFetch(path, { method: 'PATCH', body: JSON.stringify(Object.assign({ id }, fields)) }),
     remove: (id) => apiFetch(path + '?id=' + encodeURIComponent(id), { method: 'DELETE' })
@@ -383,3 +387,19 @@ function apiGetIslamicProposal(year){ return apiFetch('/maktab/calendar/islamic-
 function apiConfirmCalList(year, type, entries){ return apiFetch('/maktab/calendar/confirm', { method: 'POST', body: JSON.stringify({ year, type, entries }) }); }
 
 function apiGetMaktabAttendanceReport(from, to){ return apiFetch('/maktab/attendance-register?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to)); }
+
+// Available private browser state is discarded synchronously on V2 exit.
+function clearHifzPrivateMemory(){
+ try{currentUser={name:'',role:'student',trackHaidh:false};}catch{}
+ try{journalData={};journalAttendance={};}catch{}
+ try{clearLogContext();}catch{}
+ try{maktabDayStudent=null;maktabDayDate=null;maktabQuickAttendanceState=null;}catch{}
+ try{adminUsers=[];adminGroupsCache=null;adminJustCreatedId=null;adminMatchedId=null;}catch{}
+ try{mkAttendanceReport=null;mkregisterData=null;attPageData=null;haidhCalAttendance={};}catch{}
+ try{maktabSummaryData=null;maktabSummarySelectedDate=null;maktabQuickLogState=null;maktabRosterCache=null;maktabSetupStudent=null;}catch{}
+ try{MAKTAB_SETTINGS_CACHE=null;MAKTAB_TIMEZONE=null;MAKTAB_ZOOM_LINK=null;TAJWEED_VOCAB=[];logDetailStudentSearchRoster=[];logDetailStudentSearchLoad=null;}catch{}
+ try{sabaqPosition=null;sabaqFrontier=null;sabaqValue={from:null,to:null};sabaqEditingId=null;sabaqSelectedTags=[];}catch{}
+ try{sabaqDhorPosition=null;sabaqDhorRows=[];sabaqDhorHistory=[];sabaqDhorStoredPosition={};sabaqDhorBaselineSelection=[];sabaqDhorEditingId=null;sabaqDhorSelectedTags=[];}catch{}
+ try{dhorTodaysPlans=[];dhorActivePlanId=null;dhorEditingId=null;dhorLapTimes=null;dhorSelectedTags=[];planDhorPool=[];planDhorTodaysPlans=[];planDhorQueueDays=[];planDhorRollup={};}catch{}
+ try{tadabburCurrentId=null;tadabburEditingId=null;sih=null;baselineSelection=[];pendingNewPin=null;activeLoginId=null;}catch{}
+}

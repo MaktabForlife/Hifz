@@ -1,3 +1,4 @@
+import {allowedReturn} from './return-routes.mjs';
 import {assertCaptureReceipt} from './capture-receipt.mjs';
 import {issuanceFloorGuard} from './issuance-floors.mjs';
 import {familyPolicyRegistrationPlan} from './policy.mjs';
@@ -48,18 +49,25 @@ function exactSelector(value,app){
 }
 function sameBinding(a,b,fields=BIND){return fields.every(k=>a?.[k]===b?.[k]);}
 function callbackAllowed(registry,app,value,key){
- const list=registry[app]?.[key];requireThat(Array.isArray(list)&&list.includes(value),'UNREGISTERED_CALLBACK',400);
- const u=new URL(value);requireThat(u.origin===registry[app].origin&&!u.username&&!u.password&&!u.hash&&!u.search,'UNREGISTERED_CALLBACK',400);
+ const list=registry[app]?.[key];requireThat(key==='returns'?allowedReturn(registry,app,value):Array.isArray(list)&&list.includes(value),'UNREGISTERED_CALLBACK',400);
+ const u=new URL(value);requireThat(u.origin===registry[app].origin&&!u.username&&!u.password&&!u.hash&&(key==='returns'||!u.search),'UNREGISTERED_CALLBACK',400);
 }
 function accountSnapshot(s){
  requireThat(s&&typeof s.sub==='string'&&safeInt(s.ce,1)&&safeInt(s.generation,1)&&typeof s.active==='boolean'&&typeof s.setupComplete==='boolean'&&ascii(String(s.revision)),'CREDENTIAL_UNAVAILABLE',503);
  return s;
 }
 export class AcademyCeremonies {
- constructor({store,config,callbacks,clock,credentialSnapshot,credentialGuard,verifyPin,setupPlan,authorisePinRequest,attestedSource,authoriseChild,parentEligibility,parentGuard,signingKey,kid}){
+ constructor({store,config,callbacks,clock,credentialSnapshot,credentialGuard,verifyPin,setupPlan,authorisePinRequest,attestedSource,authoriseChild,parentEligibility,parentGuard,assertCodeAuthority=null,signingKey,kid}){
   requireThat(store.app==='academy'&&config.app==='academy','ACADEMY_PIN_ONLY',503);
   for(const cb of [clock,credentialSnapshot,credentialGuard,verifyPin,authorisePinRequest,attestedSource,authoriseChild,parentEligibility,parentGuard])requireThat(typeof cb==='function','CEREMONY_ADAPTER_REQUIRED',503);
-  Object.assign(this,{store,config,callbacks,clock,credentialSnapshot,credentialGuard,verifyPin,setupPlan,authorisePinRequest,attestedSource,authoriseChild,parentEligibility,parentGuard,signingKey,kid});
+  Object.assign(this,{store,config,callbacks,clock,credentialSnapshot,credentialGuard,verifyPin,setupPlan,authorisePinRequest,attestedSource,authoriseChild,parentEligibility,parentGuard,assertCodeAuthority,signingKey,kid});
+ }
+ async codeAuthorityChecks(ceremony,parent,operationId){
+  if(!this.assertCodeAuthority||!TYPES.includes(ceremony.purpose))return [];
+  requireThat(typeof this.assertCodeAuthority==='function','NATIVE_CODE_AUTHORITY_ADAPTER_REQUIRED',503);
+  const result=await this.assertCodeAuthority({ceremony,parent,operationId});
+  requireThat(result?.ready===true&&typeof result.guard?.sql==='string'&&Array.isArray(result.guard.args),'NATIVE_CODE_AUTHORITY_NOT_READY',503);
+  return this.store.guard(result.guard.sql,result.guard.args);
  }
  async pinRequest(request,tx){
   ownOrigin(request,this.config);requireThat(request.headers.get('X-UAA-Request')==='2','CEREMONY_HEADER_REQUIRED',403);
@@ -123,6 +131,10 @@ export class AcademyCeremonies {
   requireThat(c.active&&c.ce===attempt.credential_epoch&&c.generation===attempt.gate_generation,'CREDENTIAL_CHANGED',409);
   requireThat(setup?!c.setupComplete:c.setupComplete,setup?'PIN_SETUP_NOT_ELIGIBLE':'PIN_SETUP_REQUIRED',409);
   if(setup)requireThat(typeof this.setupPlan==='function','PIN_SETUP_ADAPTER_REQUIRED',503);
+  // Slow native transfer finished in the read-only proceed stage, before a PIN
+  // attempt is reserved or its fixed 60-second result/grant clock can begin.
+  const preparedParent=this.assertCodeAuthority&&TYPES.includes(ceremony.purpose)?await this.parentEligibility({request,sub:ceremony.sub,tx,purpose:ceremony.purpose,targetApp:ceremony.target_app,expected:ceremony.expected_json&&JSON.parse(ceremony.expected_json)}):null;
+  const codeChecks=preparedParent?await this.codeAuthorityChecks(ceremony,preparedParent,tx):[];
   let gate=await this.store.first('SELECT * FROM jwt_v2_pin_gates WHERE sub=?',attempt.sub);
   requireThat(gate&&gate.generation===c.generation,'CREDENTIAL_CHANGED',409);
   requireThat(now>=gate.paused_until,'PIN_PAUSED',429);
@@ -152,11 +164,11 @@ export class AcademyCeremonies {
    reject('REQUEST_RATE_LIMITED',429);
   }
   gate=await this.store.first('SELECT * FROM jwt_v2_pin_gates WHERE sub=?',attempt.sub);
-  let verified=false,setupStatements=[];
+  let verified=false,setupStatements=[],setupCommittedCe=null;
   try{
    const fresh=accountSnapshot(await this.credentialSnapshot(attempt.sub));
    requireThat(canonical(fresh)===canonical(c),'CREDENTIAL_CHANGED',409);
-   if(setup){const plan=await this.setupPlan({credential:c,pin});requireThat(plan&&Array.isArray(plan.statements),'PIN_SETUP_ADAPTER_REQUIRED',503);setupStatements=plan.statements;verified=true;}
+   if(setup){const plan=await this.setupPlan({credential:c,pin});requireThat(plan&&Array.isArray(plan.statements),'PIN_SETUP_ADAPTER_REQUIRED',503);requireThat(safeInt(plan.postSetupCe,1)&&plan.postSetupCe===c.ce+1&&plan.requiresFreshPostSetupParent===true,'PIN_SETUP_ADAPTER_REQUIRED',503);setupStatements=plan.statements;setupCommittedCe=plan.postSetupCe;verified=true;}
    else verified=await this.verifyPin(pin,c);
    requireThat(typeof verified==='boolean','PIN_VERIFIER_UNAVAILABLE',503);
   }catch(error){
@@ -167,7 +179,7 @@ export class AcademyCeremonies {
   const fresh=accountSnapshot(await this.credentialSnapshot(attempt.sub));requireThat(canonical(fresh)===canonical(c),'CREDENTIAL_CHANGED',409);
   requireThat(safeInt(gate.failures)&&safeInt(gate.failures+1),'PIN_COUNTER_EXHAUSTED',503);
   const wrong=gate.failures+1,pause=verified?0:pinPauseSeconds(wrong);
-  const result=verified?{status:'VERIFIED',attemptId,tx,verifiedAt:now,expiresAt:Math.min(now+60,ceremony.expires_at),setup}:{status:pause?'PIN_PAUSED':'WRONG_PIN',attemptId,failures:wrong,pausedUntil:pause?now+pause:0};
+  const result=verified?{status:'VERIFIED',attemptId,tx,verifiedAt:now,expiresAt:Math.min(now+60,ceremony.expires_at),setup,...(setup?{setupCommittedCe}: {})}:{status:pause?'PIN_PAUSED':'WRONG_PIN',attemptId,failures:wrong,pausedUntil:pause?now+pause:0};
   const currentParent=ceremony.parent_json?await this.parentEligibility({request,sub:attempt.sub,tx,purpose:ceremony.purpose,targetApp:ceremony.target_app,expected:ceremony.expected_json&&JSON.parse(ceremony.expected_json)}):null;
   if(ceremony.parent_json)requireThat(sameBinding(currentParent,JSON.parse(ceremony.parent_json))&&now<currentParent.s_exp,'PARENT_CHANGED',409);
   const grant=verified&&TYPES.includes(ceremony.purpose)?this.grantClaims(ceremony,currentParent,now):null;
@@ -176,11 +188,11 @@ export class AcademyCeremonies {
   const parentCas=currentParent?this.parentGuard(currentParent):null;
   const parentChecks=parentCas?this.store.guard(parentCas.sql,parentCas.args):[];
   try{
-   await this.store.batch([fg,ng,...(parentChecks.length?[parentChecks[0]]:[]),...setupStatements,
+   await this.store.batch([fg,ng,...(parentChecks.length?[parentChecks[0]]:[]),...(codeChecks.length?[codeChecks[0]]:[]),...setupStatements,
     this.store.stmt('UPDATE jwt_v2_pin_gates SET failures=?,paused_until=?,reservation=NULL,reservation_until=NULL WHERE sub=?',verified?0:wrong,verified?0:result.pausedUntil,attempt.sub),
     this.store.stmt("UPDATE jwt_v2_ceremony_attempts SET status='DONE',result_json=? WHERE attempt_id=?",resultJSON(result),attemptId),
     this.store.stmt('DELETE FROM jwt_v2_ceremony_reservations WHERE attempt_id=?',attemptId),
-    ...(verified?[this.store.stmt('UPDATE jwt_v2_ceremonies SET pin_attempt=?,grant_json=? WHERE tx=?',attemptId,grant===null?null:canonical(grant),tx)]:[]),...(parentChecks.length?[parentChecks[1]]:[]),nc,fc
+    ...(verified?[this.store.stmt('UPDATE jwt_v2_ceremonies SET pin_attempt=?,grant_json=? WHERE tx=?',attemptId,grant===null?null:canonical(grant),tx)]:[]),...(codeChecks.length?[codeChecks[1]]:[]),...(parentChecks.length?[parentChecks[1]]:[]),nc,fc
    ]);
    return result;
   }catch(error){await this.finishUnavailable({attempt,c,now,code:'PIN_RESULT_NOT_COMMITTED'});reject('PIN_RESULT_NOT_COMMITTED',503);}
@@ -227,11 +239,11 @@ export class AcademyCeremonies {
   else{const expected=JSON.parse(ceremony.expected_json);for(const key of ['sid','le','sv','ue'])c[key]=expected[key];}
   return c;
  }
- async issueCode({request,tx,state,operationId}){
-  requireThat(uuid(operationId),'UNISSUED_OPERATION',400);await this.pinRequest(request,tx);unb64u(state,32);
+ async issueCode({request,tx,state,stateHash,operationId}){
+  requireThat(uuid(operationId),'UNISSUED_OPERATION',400);await this.pinRequest(request,tx);if(stateHash===undefined)unb64u(state,32);else requireThat(/^[0-9a-f]{64}$/.test(stateHash),'INVALID_STATE_HASH',400);
   const now=this.clock(),c=await this.store.first('SELECT * FROM jwt_v2_ceremonies WHERE tx=?',tx);
   requireThat(c&&TYPES.includes(c.purpose)&&c.sub&&now<c.expires_at,'CEREMONY_EXPIRED',409);
-  requireThat(equal(await digestState(state),c.state_hash),'STATE_CONFLICT',403);
+  requireThat(equal(stateHash??await digestState(state),c.state_hash),'STATE_CONFLICT',403);
   if(c.status!=='PENDING')return noCookies({status:'CODE_ALREADY_ISSUED',tx});
   const parent=await this.parentEligibility({request,sub:c.sub,tx,purpose:c.purpose,targetApp:c.target_app,expected:c.expected_json&&JSON.parse(c.expected_json)});
   requireThat(sameBinding(parent,JSON.parse(c.parent_json))&&now<parent.s_exp,'PARENT_CHANGED',401);
@@ -242,18 +254,19 @@ export class AcademyCeremonies {
    requireThat(attempt?.status==='DONE'&&result?.status==='VERIFIED'&&result.tx===tx&&now<result.expiresAt&&grant&&now<grant.exp,'FRESH_PIN_REQUIRED',423);
   }else grant=grant||this.grantClaims(c,parent,now);
   requireThat(sameBinding(grant,parent),'GRANT_BINDING_CONFLICT',409);
+  const codeChecks=await this.codeAuthorityChecks(c,parent,operationId);
   const code=opaque(),codeHash=await domainDigest('uaa-code-v2',{env:this.config.env,target:c.target_app,code}),deadline=Math.min(now+60,c.expires_at,parent.s_exp,grant.exp);
   const [g,clear]=this.store.guard("SELECT 1 FROM jwt_v2_ceremonies WHERE tx=? AND status='PENDING' AND expires_at>? AND parent_json=?",[tx,now,c.parent_json]);
   const credential=accountSnapshot(await this.credentialSnapshot(c.sub));requireThat(credential.active&&credential.ce===grant.ce,'CREDENTIAL_CHANGED',409);
   const pg=this.parentGuard(parent),cg=this.credentialGuard(credential),[pguard,pc]=this.store.guard(pg.sql,pg.args),[cguard,cc]=this.store.guard(cg.sql,cg.args);
   try{
-   await this.store.batch([g,pguard,cguard,this.store.stmt("UPDATE jwt_v2_ceremonies SET code_hash=?,code_expires=?,grant_json=?,issue_operation=?,status='CODE_ISSUED' WHERE tx=?",codeHash,deadline,canonical(grant),operationId,tx),cc,pc,clear]);
+   await this.store.batch([g,pguard,cguard,...(codeChecks.length?[codeChecks[0]]:[]),this.store.stmt("UPDATE jwt_v2_ceremonies SET code_hash=?,code_expires=?,grant_json=?,issue_operation=?,status='CODE_ISSUED' WHERE tx=?",codeHash,deadline,canonical(grant),operationId,tx),...(codeChecks.length?[codeChecks[1]]:[]),cc,pc,clear]);
   }catch(error){
    const current=await this.store.first('SELECT status FROM jwt_v2_ceremonies WHERE tx=?',tx);
    if(['CODE_ISSUED','GRANTED'].includes(current?.status))return noCookies({status:'CODE_ALREADY_ISSUED',tx});
    throw error;
   }
-  return {winner:true,cookies:false,tx,code,state,callback:c.callback,expiresAt:deadline};
+  return {winner:true,cookies:false,tx,code,...(stateHash?{stateHash}:{state}),callback:c.callback,expiresAt:deadline};
  }
  async redeem({request,tx,targetApp,purpose,operationId,code,verifier}){
   requireThat(uuid(operationId)&&TYPES.includes(purpose)&&APP.includes(targetApp),'INVALID_REDEMPTION',400);
@@ -291,11 +304,11 @@ export const digestState=async state=>{unb64u(state,32);return Array.from(await 
  * one batch. No raw proof, code, refresh or successor is stored here.
  */
 export class LocalCeremonyConsumer {
- constructor({store,config,keys,clock,authoriseRequest,readInstalled,mappingGuard,prepareTransition,policyMinutes=90}){
+ constructor({store,config,keys,clock,authoriseRequest,readInstalled,mappingGuard,prepareTransition,prepareAuthority=null,policyMinutes=90}){
   requireThat(APP.includes(store.app)&&store.app===config.app&&TYPES.every(Boolean),'CHILD_CONSUMER_ONLY',503);
   for(const cb of [clock,authoriseRequest,readInstalled,mappingGuard,prepareTransition])requireThat(typeof cb==='function','CEREMONY_ADAPTER_REQUIRED',503);
   requireThat(safeInt(policyMinutes,15)&&policyMinutes<=200,'INVALID_POLICY',503);
-  Object.assign(this,{store,config,keys,clock,authoriseRequest,readInstalled,mappingGuard,prepareTransition,policyMinutes});
+  Object.assign(this,{store,config,keys,clock,authoriseRequest,readInstalled,mappingGuard,prepareTransition,prepareAuthority,policyMinutes});
  }
  async request(request,tx){
   ownOrigin(request,this.config);requireThat(request.headers.get('X-UAA-Request')==='2','CEREMONY_HEADER_REQUIRED',403);
@@ -323,7 +336,7 @@ export class LocalCeremonyConsumer {
   requireThat(pending&&pending.operation_id===operationId&&equal(auth.csrfHash,pending.csrf_hash),'UNISSUED_OPERATION',403);
   const known=await this.store.first('SELECT * FROM jwt_v2_ceremony_consumed WHERE tx=?',tx);
   const handoffHeader=strictJSON(unb64u(proof.split('.')[0]));
- const claims=await verifyToken(proof,{profile:pending.purpose,config:this.config,keys:this.keys,now,allowExpired:Boolean(known)});
+ const claims=Object.freeze(await verifyToken(proof,{profile:pending.purpose,config:this.config,keys:this.keys,now,allowExpired:Boolean(known)}));
   requireThat(claims.tx===tx,'GRANT_TRANSACTION_CONFLICT',403);const hash=await digest(claims);
   if(known){requireThat(known.grant_digest===hash&&known.operation_id===operationId,'GRANT_CONFLICT',409);return noCookies({status:'OPERATION_SUPERSEDED',operationId});}
   try{
@@ -337,7 +350,9 @@ export class LocalCeremonyConsumer {
    requireThat(!ever,'CHILD_BARRIER_UNAVAILABLE',503);
   }
   const barrier=pending.purpose==='unlock'?{lastRefresh:now,idleUntil:Math.min(now+this.policyMinutes*60,claims.s_exp),locked:false,state:'UNLOCKED'}:admissionBarrier({existing:prior?{lastRefresh:prior.last_refresh,idleUntil:prior.idle_until,locked:Boolean(prior.locked)}:null,afg:claims.afg,now,policyMinutes:this.policyMinutes,s_exp:claims.s_exp});
-  const plan=await this.prepareTransition({claims,purpose:pending.purpose,expected,installed,barrier,now,operationId});
+  if(this.prepareAuthority){requireThat(typeof this.prepareAuthority==='function','NATIVE_AUTHORITY_PREPARATION_REQUIRED',503);await this.prepareAuthority({claims,tx,purpose:pending.purpose,proof,operationId,expected,installed});}
+  requireThat(this.clock()<claims.exp&&this.clock()<pending.expires_at,'GRANT_EXPIRED',409);
+  const plan=await this.prepareTransition({claims,purpose:pending.purpose,expected,installed,barrier,now:this.clock(),operationId});
   requireThat(plan&&Array.isArray(plan.statements)&&plan.statements.length>0&&plan.result,'LOCAL_TRANSITION_PLAN_REQUIRED',503);
   const result=plan.result;
   requireThat(uuid(result.sid)&&safeInt(result.sv,1)&&safeInt(result.ue)&&safeInt(result.le)&&result.s_exp===claims.s_exp&&result.state===barrier.state,'INVALID_LOCAL_TRANSITION',503);
@@ -350,12 +365,14 @@ export class LocalCeremonyConsumer {
   const [keyGuard,keyClear]=this.store.guard("SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM jwt_v2_restrictions WHERE json_extract(target_json,'$.type')='key' AND json_extract(target_json,'$.purpose')='academy-handoff' AND json_extract(target_json,'$.kid')=?)",[handoffHeader.kid]);
   const safeResult={status:'COMMITTED',sid:result.sid,sv:result.sv,ue:result.ue,s_exp:result.s_exp,state:result.state,le:result.le,operationId};
   const [g,clear]=this.store.guard("SELECT 1 FROM jwt_v2_ceremony_pending WHERE tx=? AND operation_id=? AND status='PENDING' AND expires_at>?",[tx,operationId,now]);
-  const mapping=this.mappingGuard(claims),[mg,mc]=this.store.guard(mapping.sql,mapping.args),[floor,fc]=admissionFloorGuard(this.store,{...claims,app:this.config.app,le:result.le});
+  const mapping=await this.mappingGuard(claims),[mg,mc]=this.store.guard(mapping.sql,mapping.args),[floor,fc]=admissionFloorGuard(this.store,{...claims,app:this.config.app,le:result.le});
   const [barrierGuard,barrierClear]=prior?this.store.guard('SELECT 1 FROM jwt_v2_ceremony_barriers WHERE psid=? AND bsid=? AND bv=? AND sub=? AND revision=?',[claims.psid,claims.bsid,claims.bv,claims.sub,prior.revision]):this.store.guard('SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM jwt_v2_ceremony_barriers WHERE psid=? AND bsid=? AND bv=? AND sub=?)',[claims.psid,claims.bsid,claims.bv,claims.sub]);
   const bindingColumns='sid sub psid bsid bv ce ae le sv ue vat s_iat s_exp'.split(' ');
   const jsonBindingCheck=bindingColumns.map(k=>" AND json_extract(f.binding_json,'$."+k+"')=f."+k).join('');
   const [projectionGuard,projectionClear]=this.store.guard('SELECT 1 FROM jwt_v2_families WHERE sid=? AND projection_json=? AND authority_ready=? AND (?<>\'UNLOCKED\' OR deadline<=json_extract(projection_json,\'$.timedUntil\'))',[result.sid,canonical(plan.projection),Number(result.state==='UNLOCKED'),result.state]);
   const [final,finalClear]=this.store.guard("SELECT 1 FROM jwt_v2_families f JOIN jwt_v2_accounts a ON a.sub=f.sub JOIN jwt_v2_parents p ON p.psid=f.psid JOIN jwt_v2_browsers b ON b.bsid=f.bsid WHERE f.sid=? AND f.sub=? AND f.psid=? AND f.bsid=? AND f.bv=? AND f.ce=? AND f.ae=? AND f.s_iat=? AND f.s_exp=? AND f.state=? AND f.sv=? AND f.ue=? AND f.le=? AND f.last_refresh=? AND f.idle_until=? AND a.active=1 AND a.ce=f.ce AND a.ae=f.ae AND a.le=f.le AND p.sub=f.sub AND p.bsid=f.bsid AND p.bv=f.bv AND p.ce=f.ce AND p.ae=f.ae AND p.s_iat=f.s_iat AND p.s_exp=f.s_exp AND p.state IN('UNLOCKED','LOCKED') AND b.sub=f.sub AND b.psid=f.psid AND b.bv=f.bv AND b.cancelled_through<f.bv AND f.vat>=f.s_iat AND f.vat<=?"+jsonBindingCheck,[result.sid,claims.sub,claims.psid,claims.bsid,claims.bv,claims.ce,claims.ae,claims.s_iat,claims.s_exp,result.state,result.sv,result.ue,result.le,barrier.lastRefresh,barrier.idleUntil,now]);
+  const proofClock=this.store.guard('SELECT 1 WHERE ?>? AND ?>unixepoch()',[claims.exp,this.clock(),claims.exp]);
+  const installedGuard=installed?this.store.guard("SELECT 1 FROM jwt_v2_families WHERE sid=? AND fingerprint=? AND sub=? AND psid=? AND bsid=? AND bv=? AND ce=? AND ae=? AND le=? AND sv=? AND ue=? AND state IN('UNLOCKED','LOCKED','ADMITTED_LOCKED') AND s_exp>?",[installed.sid,installed.fingerprint,installed.sub,installed.psid,installed.bsid,installed.bv,installed.ce,installed.ae,installed.le,installed.sv,installed.ue,this.clock()]):[null,null];
   const cancelSid=installed?.sid,unlockFamily=pending.purpose==='unlock'?await this.store.family(installed.sid):null;
   const historyPlan=[];
   if(unlockFamily){
@@ -365,12 +382,12 @@ export class LocalCeremonyConsumer {
   }
   const [oldGuard,oldClear]=cancelSid&&cancelSid!==result.sid?this.store.guard("SELECT 1 FROM jwt_v2_families WHERE sid=? AND state IN('REVOKED','EXPIRED')",[cancelSid]):[null,null];
   try{
-   await this.store.batch([g,mg,floor,keyGuard,barrierGuard,...historyPlan,...plan.statements,
+   await this.store.batch([g,mg,floor,keyGuard,barrierGuard,proofClock[0],...(installedGuard[0]?[installedGuard[0]]:[]),...historyPlan,...plan.statements,
     ...(pending.purpose==='unlock'?[this.store.stmt("UPDATE jwt_v2_parents SET state='UNLOCKED',foreground_at=? WHERE psid=? AND sub=? AND bsid=? AND bv=? AND ce=? AND ae=? AND state IN('UNLOCKED','LOCKED')",now,claims.psid,claims.sub,claims.bsid,claims.bv,claims.ce,claims.ae)]:[]),
     this.store.stmt('INSERT INTO jwt_v2_ceremony_barriers VALUES(?,?,?,?,?,?,?,1) ON CONFLICT(psid,bsid,bv,sub) DO UPDATE SET last_refresh=excluded.last_refresh,idle_until=excluded.idle_until,locked=excluded.locked,revision=revision+1',claims.psid,claims.bsid,claims.bv,claims.sub,barrier.lastRefresh,barrier.idleUntil,Number(barrier.locked)),
     ...(cancelSid?[this.store.stmt("UPDATE jwt_v2_intents SET state=CASE WHEN intent_id=? THEN 'COMMITTED' ELSE 'CANCELLED' END,superseding_operation=?,result_json=? WHERE sid=? AND state='ISSUED'",operationId,operationId,canonical(safeResult),cancelSid)]:[]),
     ...policyRegistration,...(issuance[0]?[issuance[0]]:[]),...(oldGuard?[oldGuard]:[]),projectionGuard,final,this.store.stmt('INSERT INTO jwt_v2_ceremony_consumed VALUES(?,?,?,?,?,?)',claims.jti,tx,operationId,hash,canonical(safeResult),now),
-    this.store.stmt("UPDATE jwt_v2_ceremony_pending SET status='COMMITTED' WHERE tx=?",tx),finalClear,projectionClear,...(issuance[1]?[issuance[1]]:[]),...(oldClear?[oldClear]:[]),barrierClear,keyClear,fc,mc,clear
+    this.store.stmt("UPDATE jwt_v2_ceremony_pending SET status='COMMITTED' WHERE tx=?",tx),finalClear,projectionClear,...(issuance[1]?[issuance[1]]:[]),...(oldClear?[oldClear]:[]),...(installedGuard[1]?[installedGuard[1]]:[]),proofClock[1],barrierClear,keyClear,fc,mc,clear
    ]);
   }catch(error){
    const winner=await this.store.first('SELECT * FROM jwt_v2_ceremony_consumed WHERE tx=?',tx);

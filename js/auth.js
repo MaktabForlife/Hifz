@@ -256,6 +256,7 @@ function setupAuthBandAndDropdown(){
     openFloatingTimer();
   });
   document.getElementById('logoutBtn').addEventListener('click', () => {
+    if(Boolean(globalThis.HifzV111?.active)){void globalThis.HifzV111.logout();return;}
     clearToken();
     location.reload();
   });
@@ -263,6 +264,7 @@ function setupAuthBandAndDropdown(){
   // screen for the account just left. The token goes first — the switcher
   // never carries a session across accounts.
   document.getElementById('switchAccountBtn').addEventListener('click', () => {
+    if(Boolean(globalThis.HifzV111?.active)){void globalThis.HifzV111.switchAccount().catch(e=>showBanner(e.message));return;}
     clearToken();
     requestAccountSwitch();
     location.reload();
@@ -329,6 +331,7 @@ let pinSetupBusy = false;
 // fetch it depends on); a missing/unknown/inactive ID still falls back to the
 // plain ID+PIN screen.
 async function routeToLoginScreen(){
+  if(Boolean(globalThis.HifzV111?.active)){globalThis.HifzV111.showAccess();return;}
   // V3.77.0 (j): "Switch account" from the menu reloads with this flag set —
   // show the device's known accounts before anything else. Consumed on read
   // so a plain refresh afterwards routes normally.
@@ -469,6 +472,7 @@ function escapeHtmlForSwitch(v){ const d = document.createElement('span'); d.tex
 // "Use another ID" from the PIN screens: with known accounts on the device,
 // offer them first; otherwise the plain ID+PIN screen as before.
 function switchLoginAccount(){
+  if(Boolean(globalThis.HifzV111?.active)){void globalThis.HifzV111.switchAccount().catch(e=>showBanner(e.message));return;}
   clearToken();
   forgetRememberedLoginId();
   if(getKnownAccounts().length){

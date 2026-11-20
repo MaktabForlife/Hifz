@@ -1,4 +1,4 @@
-import {canonical,requireThat,ascii,safeInt,bytes,b64u,sha256,digest,uuid} from './codec.mjs';
+import {canonical,requireThat,ascii,safeInt,scalar,bytes,b64u,sha256,digest,uuid} from './codec.mjs';
 
 // Explicit additive recipe only. Imported modules never install it.
 export const issuanceFloorSchemaSQL=[
@@ -8,8 +8,9 @@ export const issuanceFloorSchemaSQL=[
 
 export const asciiUpper=value=>String(value).replace(/[a-z]/g,c=>c.toUpperCase());
 export function dependencyScope(scopeSub){
- requireThat(scopeSub===null||typeof scopeSub==='string'&&bytes(scopeSub).length>0&&bytes(scopeSub).length<=180&&!/[\u0000-\u0020\u007f]/.test(scopeSub),'INVALID_DEPENDENCY_SCOPE',503);
- return scopeSub===null?'GLOBAL':'ACCOUNT:'+asciiUpper(scopeSub);
+ if(scopeSub===null)return 'GLOBAL';
+ requireThat(typeof scopeSub==='string'&&bytes(scopeSub).length>0&&bytes(scopeSub).length<=180&&!/[\u0000-\u0020\u007f]/.test(scopeSub),'INVALID_DEPENDENCY_SCOPE',503);
+ scalar(scopeSub);const scope='ACCOUNT:'+scopeSub;requireThat(bytes(scope).length<=512,'INVALID_DEPENDENCY_SCOPE',503);return scope;
 }
 export async function scopedVectorId(id,scope){
  requireThat(ascii(id)&&typeof scope==='string'&&bytes(scope).length>0&&bytes(scope).length<=512,'INVALID_SCOPED_DEPENDENCY',503);
@@ -89,18 +90,18 @@ export function issuanceFloorGuard(store,{binding,projection,vectorGuards,existi
  AND EXISTS(SELECT 1 FROM jwt_v2_parents p WHERE p.psid=json_extract(i.binding,'$.psid') AND p.sub=json_extract(i.binding,'$.sub') AND p.bsid=json_extract(i.binding,'$.bsid') AND p.bv=json_extract(i.binding,'$.bv') AND p.ce=json_extract(i.binding,'$.ce') AND p.ae=json_extract(i.binding,'$.ae') AND p.s_iat=json_extract(i.binding,'$.s_iat') AND p.s_exp=json_extract(i.binding,'$.s_exp') AND p.s_exp>i.now AND (p.state='UNLOCKED' OR i.family_state='ADMITTED_LOCKED' AND p.state='LOCKED'))
  AND (i.family_state='ADMITTED_LOCKED' OR NOT EXISTS(SELECT 1 FROM jwt_v2_ceremony_barriers b WHERE b.psid=json_extract(i.binding,'$.psid') AND b.bsid=json_extract(i.binding,'$.bsid') AND b.bv=json_extract(i.binding,'$.bv') AND b.sub=json_extract(i.binding,'$.sub') AND (b.locked<>0 OR b.idle_until<=i.now)))
  AND NOT EXISTS(
-  SELECT 1 FROM jwt_v2_restrictions r WHERE (r.scope_sub IS NULL OR upper(r.scope_sub)=upper(json_extract(i.binding,'$.sub'))) AND NOT coalesce(
+  SELECT 1 FROM jwt_v2_restrictions r WHERE (r.scope_sub IS NULL OR r.scope_sub=json_extract(i.binding,'$.sub') COLLATE BINARY) AND NOT coalesce(
    CASE json_extract(r.target_json,'$.type')
    WHEN 'dependency' THEN
     json_type(r.target_json,'$.id')='text' AND json_type(r.target_json,'$.ownerEpoch')='text' AND json_type(r.target_json,'$.revision')='integer' AND json_extract(r.target_json,'$.revision')>=1
     AND json_type(r.target_json,'$.deniedActions')='array' AND json_extract(r.target_json,'$.effect') IN('DENY','INVALIDATE')
     AND ((json_extract(r.target_json,'$.effect')='INVALIDATE' AND json_array_length(r.target_json,'$.deniedActions')=0) OR (json_extract(r.target_json,'$.effect')='DENY' AND json_array_length(r.target_json,'$.deniedActions')>0))
-    AND (EXISTS(SELECT 1 FROM json_each(i.guards) known WHERE json_extract(known.value,'$[0]')=json_extract(r.target_json,'$.id') AND substr(json_extract(known.value,'$[0]'),1,length(i.app)+8)=i.app||':native:' AND json_extract(known.value,'$[1]')=CASE WHEN r.scope_sub IS NULL THEN 'GLOBAL' ELSE 'ACCOUNT:'||upper(r.scope_sub) END AND json_extract(known.value,'$[2]')=json_extract(r.target_json,'$.ownerEpoch')) OR EXISTS(SELECT 1 FROM json_each(i.registry) known WHERE json_extract(known.value,'$.id')=json_extract(r.target_json,'$.id') AND json_extract(known.value,'$.ownerApp')='academy' AND json_extract(known.value,'$.ownerEpoch')=json_extract(r.target_json,'$.ownerEpoch') AND EXISTS(SELECT 1 FROM json_each(known.value,'$.recipients') recipient WHERE recipient.value=i.app)))
+    AND (EXISTS(SELECT 1 FROM json_each(i.guards) known WHERE json_extract(known.value,'$[0]')=json_extract(r.target_json,'$.id') AND substr(json_extract(known.value,'$[0]'),1,length(i.app)+8)=i.app||':native:' AND json_extract(known.value,'$[1]')=CASE WHEN r.scope_sub IS NULL THEN 'GLOBAL' ELSE 'ACCOUNT:'||r.scope_sub END AND json_extract(known.value,'$[2]')=json_extract(r.target_json,'$.ownerEpoch')) OR EXISTS(SELECT 1 FROM json_each(i.registry) known WHERE json_extract(known.value,'$.id')=json_extract(r.target_json,'$.id') AND json_extract(known.value,'$.ownerApp')='academy' AND json_extract(known.value,'$.ownerEpoch')=json_extract(r.target_json,'$.ownerEpoch') AND EXISTS(SELECT 1 FROM json_each(known.value,'$.recipients') recipient WHERE recipient.value=i.app)))
     AND (
      (json_extract(r.target_json,'$.effect')='DENY' AND NOT EXISTS(SELECT 1 FROM json_each(r.target_json,'$.deniedActions') a WHERE a.type<>'text' OR NOT EXISTS(SELECT 1 FROM json_each(i.projection,'$.deniedActions') proposed WHERE proposed.value=a.value)))
-     OR EXISTS(SELECT 1 FROM json_each(i.guards) v WHERE json_extract(v.value,'$[0]')=json_extract(r.target_json,'$.id') AND substr(json_extract(v.value,'$[0]'),1,length(i.app)+8)=i.app||':native:' AND json_extract(v.value,'$[1]')=CASE WHEN r.scope_sub IS NULL THEN 'GLOBAL' ELSE 'ACCOUNT:'||upper(r.scope_sub) END AND json_extract(v.value,'$[2]')=json_extract(r.target_json,'$.ownerEpoch') AND json_extract(v.value,'$[3]')>=json_extract(r.target_json,'$.revision')
+     OR EXISTS(SELECT 1 FROM json_each(i.guards) v WHERE json_extract(v.value,'$[0]')=json_extract(r.target_json,'$.id') AND substr(json_extract(v.value,'$[0]'),1,length(i.app)+8)=i.app||':native:' AND json_extract(v.value,'$[1]')=CASE WHEN r.scope_sub IS NULL THEN 'GLOBAL' ELSE 'ACCOUNT:'||r.scope_sub END AND json_extract(v.value,'$[2]')=json_extract(r.target_json,'$.ownerEpoch') AND json_extract(v.value,'$[3]')>=json_extract(r.target_json,'$.revision')
       AND (json_extract(r.target_json,'$.effect')='INVALIDATE' OR json_extract(v.value,'$[3]')>json_extract(r.target_json,'$.revision')))
-     OR EXISTS(SELECT 1 FROM jwt_v2_applied_dependencies a WHERE a.dependency=json_extract(r.target_json,'$.id') AND a.scope=CASE WHEN r.scope_sub IS NULL THEN 'GLOBAL' ELSE 'ACCOUNT:'||upper(r.scope_sub) END AND a.owner_app='academy' AND a.owner_epoch=json_extract(r.target_json,'$.ownerEpoch') AND a.revision>=json_extract(r.target_json,'$.revision') AND json_array_length(a.native_vector_json)>0
+     OR EXISTS(SELECT 1 FROM jwt_v2_applied_dependencies a WHERE a.dependency=json_extract(r.target_json,'$.id') AND a.scope=CASE WHEN r.scope_sub IS NULL THEN 'GLOBAL' ELSE 'ACCOUNT:'||r.scope_sub END AND a.owner_app='academy' AND a.owner_epoch=json_extract(r.target_json,'$.ownerEpoch') AND a.revision>=json_extract(r.target_json,'$.revision') AND json_array_length(a.native_vector_json)>0
       AND NOT EXISTS(SELECT 1 FROM json_each(a.native_vector_json) n LEFT JOIN jwt_v2_dependencies d ON d.id=json_extract(n.value,'$[0]') AND d.scope=json_extract(n.value,'$[1]') WHERE d.id IS NULL OR d.owner_epoch<>json_extract(n.value,'$[2]') OR d.revision<>json_extract(n.value,'$[3]') OR NOT EXISTS(SELECT 1 FROM json_each(i.guards) v WHERE json_extract(v.value,'$[0]')=json_extract(n.value,'$[0]') AND json_extract(v.value,'$[1]')=json_extract(n.value,'$[1]') AND json_extract(v.value,'$[2]')=json_extract(n.value,'$[2]') AND json_extract(v.value,'$[3]')=json_extract(n.value,'$[3]'))))
     )
    WHEN 'policy' THEN json_type(r.target_json,'$.revision')='integer' AND json_type(r.target_json,'$.inactivityMinutes')='integer' AND json_extract(r.target_json,'$.policyId')='session-inactivity' AND EXISTS(SELECT 1 FROM policy_chain c JOIN jwt_v2_policy_epochs e ON e.owner_epoch=c.owner_epoch JOIN jwt_v2_policy_history h ON h.owner_epoch=e.owner_epoch WHERE h.owner_epoch=json_extract(r.target_json,'$.ownerEpoch') AND h.revision=json_extract(r.target_json,'$.revision') AND h.minutes=json_extract(r.target_json,'$.inactivityMinutes') AND e.coherent_through>=h.revision)

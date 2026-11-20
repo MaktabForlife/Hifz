@@ -1,4 +1,5 @@
 import {canonical,strictJSON,exact,requireThat,ascii,safeInt,digest} from './codec.mjs';
+import {exactContext} from './http-context.mjs';
 import {validatePolicy} from './policy.mjs';
 
 const same=(a,b)=>canonical(a)===canonical(b);
@@ -33,9 +34,9 @@ async function matchingUnlock(store,f,lockedAt){
  if(f.state!=='UNLOCKED')return true;
  const rows=await store.all("SELECT c.*,p.purpose,p.expected_json,p.status pending_status FROM jwt_v2_ceremony_consumed c JOIN jwt_v2_ceremony_pending p USING(tx) WHERE c.consumed_at>=? AND p.purpose='unlock'",lockedAt);
  for(const row of rows){
-  let result,expected;try{result=strictJSON(row.result_json);expected=strictJSON(row.expected_json);}catch{continue;}
+  let result,expected;try{result=strictJSON(row.result_json);expected=exactContext(strictJSON(row.expected_json));if(expected.app!==store.app)continue;}catch{continue;}
   if(row.pending_status!=='COMMITTED'||result.status!=='COMMITTED'||result.state!=='UNLOCKED'||result.sid!==f.sid||result.ue!==f.ue||result.s_exp!==f.s_exp||result.operationId!==row.operation_id||!safeInt(result.sv,1)||result.sv>f.sv)continue;
-  if(expected.sid!==f.sid||expected.sub!==f.sub||expected.psid!==f.psid||expected.bsid!==f.bsid||expected.bv!==f.bv||expected.ce!==f.ce||expected.ae!==f.ae||expected.le!==f.le||expected.s_iat!==f.s_iat||expected.s_exp!==f.s_exp||result.ue!==expected.ue+1||result.sv!==expected.sv+1)continue;
+  if(expected.sid!==f.sid||expected.sub!==f.sub||expected.psid!==f.psid||expected.bsid!==f.bsid||expected.bv!==f.bv||expected.ce!==f.ce||expected.ae!==f.ae||expected.le!==f.le||result.ue!==expected.ue+1||result.sv!==expected.sv+1)continue;
   return true;
  }
  return false;

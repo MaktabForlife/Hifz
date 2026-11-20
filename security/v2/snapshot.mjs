@@ -8,6 +8,9 @@ const TYPES={accountCutoffs:'accountCutoff',credentialFloors:'credentialEpoch',p
 const FIELDS={accountCutoff:'type sub maxCe maxAe reason incidentId',credentialEpoch:'type sub newCe reason',parent:'type sub psid bsid bv ce ae',browser:'type bsid maxBv',key:'type purpose kid registryRevision',policy:'type policyId ownerEpoch revision inactivityMinutes',dependency:'type id ownerEpoch revision effect deniedActions'};
 const HEX=/^[0-9a-f]{64}$/;
 const q=()=>crypto.randomUUID();
+export function snapshotContract(config){const version=config?.snapshotSchema??2;requireThat(version===2||version===3,'UNSUPPORTED_SNAPSHOT_SCHEMA',409);return version;}
+export const snapshotDomain=(metadata,kind)=>'uaa-'+kind+'-v'+(metadata.schema??2);
+export function snapshotEffect(record){if(record.type==='dependency'&&Object.hasOwn(record,'sub')){const {sub,...target}=record;return {target,scopeSub:sub};}return {target:record,scopeSub:record.sub??null};}
 const pick=(x,keys)=>Object.fromEntries(keys.map(k=>[k,x[k]]));
 const subject=s=>typeof s==='string'&&bytes(s).length>0&&bytes(s).length<=180&&!/[\u0000-\u0020\u007f]/.test(s);
 export const snapshotSchemaSQL=[
@@ -50,7 +53,7 @@ export function validateReconcileRequest(value,config){
 export const requestBinding=request=>canonical({...request,pageToken:null});
 function validateBase(meta,config,now){
  exact(meta,BASE);
- requireThat(meta.schema===2&&meta.env===config.env&&meta.ownerApp==='academy'&&meta.recipientApp===config.recipientApp&&['studio','hifz'].includes(meta.recipientApp)&&uuid(meta.requestId)&&uuid(meta.snapshotId)&&ascii(meta.stream)&&ascii(meta.ownerEpoch),'INVALID_SNAPSHOT_BINDING',409);
+ requireThat(meta.schema===snapshotContract(config)&&meta.env===config.env&&meta.ownerApp==='academy'&&meta.recipientApp===config.recipientApp&&['studio','hifz'].includes(meta.recipientApp)&&uuid(meta.requestId)&&uuid(meta.snapshotId)&&ascii(meta.stream)&&ascii(meta.ownerEpoch),'INVALID_SNAPSHOT_BINDING',409);
  requireThat(safeInt(meta.coveredThrough)&&safeInt(meta.createdAt)&&safeInt(meta.expiresAt)&&meta.expiresAt-meta.createdAt===600&&safeInt(now)&&now<meta.expiresAt&&meta.createdAt<=now+30,'SNAPSHOT_EXPIRED_OR_INVALID',409);
  requireThat(meta.predecessorEpoch===null?meta.predecessorCoveredThrough===null:ascii(meta.predecessorEpoch)&&safeInt(meta.predecessorCoveredThrough),'INVALID_PREDECESSOR',409);
 }
@@ -69,13 +72,13 @@ function validateMetadata(meta,config,now){
  requireThat(safeInt(meta.totalRecords)&&safeInt(meta.pageCount,1)&&BUCKETS.every(b=>safeInt(meta.bucketCounts[b]))&&BUCKETS.reduce((n,b)=>n+meta.bucketCounts[b],0)===meta.totalRecords,'SNAPSHOT_COUNT_CONFLICT',409);
  requireThat(meta.bucketCounts.localCutoffs===0&&meta.pageCount<=Math.max(1,meta.totalRecords),'INVALID_REMOTE_SNAPSHOT',409);
 }
-export function validateRecord(bucket,record,{ownerEpoch,recipientApp,dependencies=new Map(),recognisedEpochs=new Set([ownerEpoch])}){
+export function validateRecord(bucket,record,{ownerEpoch,recipientApp,dependencies=new Map(),recognisedEpochs=new Set([ownerEpoch]),snapshotSchema=2}){
  requireThat(BUCKETS.includes(bucket)&&bucket!=='localCutoffs'&&record?.type===TYPES[bucket],'INVALID_SNAPSHOT_BUCKET',409);
- exact(record,FIELDS[record.type].split(' '));
+ exact(record,(FIELDS[record.type]+(record.type==='dependency'&&snapshotSchema===3?' sub':'')).split(' '));
  canonical(record);
  for(const field of ['maxCe','maxAe','newCe','bv','ce','ae','maxBv','registryRevision','revision'])if(Object.hasOwn(record,field))requireThat(safeInt(record[field],1),'INVALID_SNAPSHOT_COUNTER',409);
  for(const field of ['psid','bsid'])if(Object.hasOwn(record,field))requireThat(uuid(record[field]),'INVALID_SNAPSHOT_UUID',409);
- if(Object.hasOwn(record,'sub'))requireThat(subject(record.sub),'INVALID_SNAPSHOT_SUBJECT',409);
+ if(Object.hasOwn(record,'sub'))requireThat(record.type==='dependency'&&snapshotSchema===3&&record.sub===null||subject(record.sub),'INVALID_SNAPSHOT_SUBJECT',409);
  switch(record.type){
   case 'accountCutoff':requireThat(['VOLUNTARY_LOGOUT','VERIFIED_REFRESH_REUSE','SUSPICIOUS_ACTIVITY','CONFIRMED_KEY_COMPROMISE','ACCOUNT_DISABLED'].includes(record.reason)&&(record.incidentId===null||uuid(record.incidentId)),'INVALID_SNAPSHOT_CUTOFF',409);break;
   case 'credentialEpoch':requireThat(['ADMIN_PIN_RESET','PASSWORD_RESET'].includes(record.reason),'INVALID_SNAPSHOT_CREDENTIAL_REASON',409);break;
@@ -84,6 +87,8 @@ export function validateRecord(bucket,record,{ownerEpoch,recipientApp,dependenci
   case 'dependency':{
    const rule=dependencies.get(record.id);
    requireThat(rule&&rule.ownerApp==='academy'&&rule.recipients.includes(recipientApp)&&(record.ownerEpoch===rule.epoch||rule.epochs?.has(record.ownerEpoch))&&safeInt(record.revision,1),'SNAPSHOT_DEPENDENCY_OWNER_CONFLICT',409);
+    if(snapshotSchema===3)requireThat(['ACCOUNT','GLOBAL'].includes(rule.scope)&&(rule.scope==='GLOBAL'?record.sub===null:subject(record.sub)),'SNAPSHOT_DEPENDENCY_SCOPE_CONFLICT',409);
+    else requireThat(rule.scope==='GLOBAL','AMBIGUOUS_LEGACY_DEPENDENCY_SCOPE',409);
    requireThat(['INVALIDATE','DENY'].includes(record.effect)&&Array.isArray(record.deniedActions)&&new Set(record.deniedActions).size===record.deniedActions.length,'INVALID_SNAPSHOT_ACTIONS',409);
    requireThat(record.deniedActions.every((v,i)=>ascii(v)&&rule.actions.includes(v)&&(i===0||record.deniedActions[i-1]<v)),'INVALID_SNAPSHOT_ACTIONS',409);
    requireThat(record.effect==='INVALIDATE'?record.deniedActions.length===0:record.deniedActions.length>0,'INVALID_SNAPSHOT_EFFECT',409);break;
@@ -99,7 +104,7 @@ function semanticKey(record){
   case 'browser':return canonical([record.bsid,record.maxBv]);
   case 'key':return canonical([record.purpose,record.kid,record.registryRevision]);
   case 'policy':return canonical([record.policyId,record.ownerEpoch,record.revision]);
-  case 'dependency':return canonical([record.id,record.ownerEpoch,record.revision]);
+  case 'dependency':return canonical([record.id,Object.hasOwn(record,'sub')?record.sub:null,record.ownerEpoch,record.revision]);
  }
 }
 export function compareUtf8(a,b){
@@ -111,11 +116,11 @@ function defaultDigestStream(){requireThat(typeof crypto.DigestStream==='functio
 export async function streamingSnapshotDigest(metadata,recordsForBucket,{digestStreamFactory=defaultDigestStream}={}){
  const stream=digestStreamFactory(),writer=stream.getWriter();
  const write=s=>writer.write(bytes(s));
- await write('uaa-security-snapshot-v2\0{"metadata":'+canonical(metadata)+',"state":{');
+  await write(snapshotDomain(metadata,'security-snapshot')+'\0{"metadata":'+canonical(metadata)+',"state":{');
  const keys=[...BUCKETS,'schema'].sort();
  for(let k=0;k<keys.length;k++){
   const name=keys[k];if(k)await write(',');await write(canonical(name)+':');
-  if(name==='schema'){await write('2');continue;}
+   if(name==='schema'){await write(String(metadata.schema??2));continue;}
   await write('[');let first=true;
   for await(const recordJSON of recordsForBucket(name)){if(!first)await write(',');await write(recordJSON);first=false;}
   await write(']');
@@ -174,7 +179,7 @@ export async function buildSnapshot({store,snapshotId,cursorKey,cursorKeyId,conf
   if(!rows.length)break;
   for(const row of rows){
    ordinal=row.ordinal;requireThat(row.raw_json!==null,'SNAPSHOT_RECORD_TOO_LARGE',503);
-   const record=validateRecord(row.bucket,strictJSON(row.raw_json),{...recordConfig,ownerEpoch:base.ownerEpoch,recipientApp:base.recipientApp}),json=canonical(record);
+   const record=validateRecord(row.bucket,strictJSON(row.raw_json),{...recordConfig,snapshotSchema:base.schema,ownerEpoch:base.ownerEpoch,recipientApp:base.recipientApp}),json=canonical(record);
    requireThat(bytes(canonical({bucket:row.bucket,record})).length<=61438,'SNAPSHOT_RECORD_TOO_LARGE',503);
    const old=await store.first('SELECT canonical_json,semantic_key FROM jwt_v2_reconcile_records WHERE ordinal=?',ordinal);
    if(old.canonical_json!==null){requireThat(old.canonical_json===json&&old.semantic_key===semanticKey(record),'SNAPSHOT_RECORD_CONFLICT',409);continue;}
@@ -200,12 +205,12 @@ export async function buildSnapshot({store,snapshotId,cursorKey,cursorKeyId,conf
  const metadata={...base,totalRecords:offset,bucketCounts:counts,pageCount:pageIndex};validateMetadata(metadata,config,now);
  const snapshotDigest=await streamingSnapshotDigest(metadata,b=>store.recordRows(snapshotId,b),{digestStreamFactory});
  await store.stmt("UPDATE jwt_v2_reconcile_captures SET status='BUILDING',metadata_json=?,snapshot_digest=? WHERE snapshot_id=? AND status IN('CAPTURED','BUILDING')",canonical(metadata),snapshotDigest,snapshotId).run();
- let previousPageDigest=await domainDigest('uaa-snapshot-start-v2',{metadata,snapshotDigest}),requestToken=null;
+ let previousPageDigest=await domainDigest(snapshotDomain(metadata,'snapshot-start'),{metadata,snapshotDigest}),requestToken=null;
  for(let i=0;i<pageIndex;i++){
   const part=await store.first('SELECT * FROM jwt_v2_reconcile_parts WHERE snapshot_id=? AND page_index=?',snapshotId,i);requireThat(part,'SNAPSHOT_PART_MISSING',409);
   const nextPageToken=i===pageIndex-1?null:await snapshotCursor(metadata,snapshotDigest,i+1,cursorKey);
   const page={...metadata,mode:'SNAPSHOT',snapshotDigest,pageIndex:i,recordOffset:part.record_offset,entries:strictJSON(part.entries_json),previousPageDigest,nextPageToken};
-  page.pageDigest=await domainDigest('uaa-snapshot-page-v2',page);const json=canonical(page);
+  page.pageDigest=await domainDigest(snapshotDomain(metadata,'snapshot-page'),page);const json=canonical(page);
   requireThat(bytes(json).length<=65536,'SNAPSHOT_PAGE_TOO_LARGE',503);
   const prior=await store.first('SELECT page_json FROM jwt_v2_reconcile_pages WHERE snapshot_id=? AND page_index=?',snapshotId,i);requireThat(!prior||prior.page_json===json,'SNAPSHOT_PAGE_CONFLICT',409);
   if(!prior)await store.stmt('INSERT INTO jwt_v2_reconcile_pages VALUES(?,?,?,?) ON CONFLICT(snapshot_id,page_index) DO NOTHING',snapshotId,i,requestToken,json).run();
@@ -239,7 +244,7 @@ function validatePage(raw,{config,recordConfig,trust,now}){
  requireThat(meta.totalRecords===0?meta.pageCount===1&&page.pageIndex===0&&page.recordOffset===0&&page.entries.length===0:page.entries.length>0,'INVALID_EMPTY_SNAPSHOT',409);
  let previous=null;
  for(const entry of page.entries){
-  exact(entry,['bucket','record']);validateRecord(entry.bucket,entry.record,{...recordConfig,ownerEpoch:meta.ownerEpoch,recipientApp:meta.recipientApp});
+  exact(entry,['bucket','record']);validateRecord(entry.bucket,entry.record,{...recordConfig,snapshotSchema:meta.schema,ownerEpoch:meta.ownerEpoch,recipientApp:meta.recipientApp});
   const current={bucket:entry.bucket,json:canonical(entry.record)};requireThat(ordered(previous,current),'SNAPSHOT_RECORD_ORDER',409);previous=current;
  }
  const text=typeof raw==='string'?raw:new TextDecoder('utf-8',{fatal:true}).decode(raw);requireThat(canonical(page)===text,'NONCANONICAL_SNAPSHOT_WIRE',409);
@@ -283,8 +288,8 @@ export class SnapshotReceiver {
   const {page,meta,text}=validatePage(raw,{config:this.config,recordConfig:this.recordConfig,trust:this.trust,now});
   await this.pendingFor(meta);
   const unsigned=Object.fromEntries(Object.entries(page).filter(([k])=>k!=='pageDigest'));
-  requireThat(equal(page.pageDigest,await domainDigest('uaa-snapshot-page-v2',unsigned)),'SNAPSHOT_PAGE_DIGEST',409);
-  if(page.pageIndex===0)requireThat(equal(page.previousPageDigest,await domainDigest('uaa-snapshot-start-v2',{metadata:meta,snapshotDigest:page.snapshotDigest})),'SNAPSHOT_CHAIN_SEED',409);
+  requireThat(equal(page.pageDigest,await domainDigest(snapshotDomain(meta,'snapshot-page'),unsigned)),'SNAPSHOT_PAGE_DIGEST',409);
+  if(page.pageIndex===0)requireThat(equal(page.previousPageDigest,await domainDigest(snapshotDomain(meta,'snapshot-start'),{metadata:meta,snapshotDigest:page.snapshotDigest})),'SNAPSHOT_CHAIN_SEED',409);
   let capture=await this.store.first('SELECT * FROM jwt_v2_receive_snapshots WHERE snapshot_id=? OR request_id=?',meta.snapshotId,meta.requestId);
   requireThat(!capture||capture.snapshot_id===meta.snapshotId&&capture.metadata_json===canonical(meta)&&capture.snapshot_digest===page.snapshotDigest,'SNAPSHOT_METADATA_CONFLICT',409);
   if(!capture)await this.store.stmt("INSERT INTO jwt_v2_receive_snapshots VALUES(?,?,?,?,'STAGED') ON CONFLICT DO NOTHING",meta.snapshotId,meta.requestId,canonical(meta),page.snapshotDigest).run();
@@ -302,13 +307,13 @@ export class SnapshotReceiver {
   const count=await this.store.first('SELECT count(*) n FROM jwt_v2_receive_pages WHERE snapshot_id=?',snapshotId);
   if(count.n<meta.pageCount)return {status:'STAGED',complete:false,snapshotId};
   requireThat(count.n===meta.pageCount,'EXTRA_SNAPSHOT_PAGE',409);
-  let previousDigest=await domainDigest('uaa-snapshot-start-v2',{metadata:meta,snapshotDigest:capture.snapshot_digest}),offset=0,previousRecord=null,previousEntries=null;
+  let previousDigest=await domainDigest(snapshotDomain(meta,'snapshot-start'),{metadata:meta,snapshotDigest:capture.snapshot_digest}),offset=0,previousRecord=null,previousEntries=null;
   const counts=Object.fromEntries(BUCKETS.map(b=>[b,0]));
   for(let index=0;index<meta.pageCount;index++){
    const row=await this.store.first('SELECT page_json FROM jwt_v2_receive_pages WHERE snapshot_id=? AND page_index=?',snapshotId,index);requireThat(row,'SNAPSHOT_PAGE_GAP',409);
    const {page}=validatePage(row.page_json,{config:this.config,recordConfig:this.recordConfig,trust:this.trust,now});
    requireThat(page.pageIndex===index&&page.recordOffset===offset&&page.previousPageDigest===previousDigest&&canonical(pick(page,META))===capture.metadata_json&&page.snapshotDigest===capture.snapshot_digest,'SNAPSHOT_CHAIN_OR_OFFSET',409);
-   const unsigned=Object.fromEntries(Object.entries(page).filter(([k])=>k!=='pageDigest'));requireThat(page.pageDigest===await domainDigest('uaa-snapshot-page-v2',unsigned),'SNAPSHOT_PAGE_DIGEST',409);
+   const unsigned=Object.fromEntries(Object.entries(page).filter(([k])=>k!=='pageDigest'));requireThat(page.pageDigest===await domainDigest(snapshotDomain(meta,'snapshot-page'),unsigned),'SNAPSHOT_PAGE_DIGEST',409);
    if(previousEntries&&previousEntries.length<20)requireThat(bytes(canonical([...previousEntries,page.entries[0]])).length>61440,'NON_GREEDY_SNAPSHOT_PARTITION',409);
    for(const entry of page.entries){
     const current={bucket:entry.bucket,json:canonical(entry.record)};
@@ -338,15 +343,16 @@ export class SnapshotReceiver {
   for(;;){
    const rows=await this.store.all('SELECT * FROM jwt_v2_receive_records WHERE snapshot_id=? AND record_offset>? ORDER BY record_offset LIMIT 20',snapshotId,offset);if(!rows.length)break;
    for(const row of rows){
-    offset=row.record_offset;const old=await this.store.first('SELECT * FROM jwt_v2_snapshot_effects WHERE snapshot_id=? AND record_offset=?',snapshotId,offset);if(old){requireThat(old.record_digest===row.record_digest,'SNAPSHOT_APPLICATION_CONFLICT',409);continue;}
+    offset=row.record_offset;const old=await this.store.first('SELECT e.*,w.target_json,w.scope_sub FROM jwt_v2_snapshot_effects e JOIN jwt_v2_worksets w ON w.work_id=e.work_id WHERE e.snapshot_id=? AND e.record_offset=?',snapshotId,offset);if(old){const scoped=snapshotEffect(strictJSON(row.record_json));requireThat(old.record_digest===row.record_digest&&old.target_json===canonical(scoped.target)&&(old.scope_sub??null)===scoped.scopeSub,'SNAPSHOT_APPLICATION_CONFLICT',409);continue;}
     validateMetadata(metadata,this.config,Math.max(now,this.clock()));
     const effect=await planEffect({bucket:row.bucket,record:strictJSON(row.record_json),recordDigest:row.record_digest,snapshotId,offset});
     requireThat(ascii(effect.workId,256)&&Array.isArray(effect.statements),'SNAPSHOT_EFFECT_PLAN_REQUIRED',503);
     validateMetadata(metadata,this.config,Math.max(now,this.clock()));
     const [g,clear]=this.store.guard("SELECT 1 FROM jwt_v2_receive_snapshots WHERE snapshot_id=? AND status IN('VERIFIED','APPLIED')",[snapshotId]);
-    const [coverage,coverageClear]=this.store.guard('SELECT 1 FROM jwt_v2_worksets WHERE work_id=? AND target_json=?',[effect.workId,row.record_json]);
+    const expected=snapshotEffect(strictJSON(row.record_json));
+     const [coverage,coverageClear]=this.store.guard('SELECT 1 FROM jwt_v2_worksets WHERE work_id=? AND target_json=? AND scope_sub IS ?',[effect.workId,canonical(expected.target),expected.scopeSub]);
     try{await this.store.batch([g,...effect.statements,coverage,this.store.stmt('INSERT INTO jwt_v2_snapshot_effects VALUES(?,?,?,?)',snapshotId,offset,row.record_digest,effect.workId),coverageClear,clear]);}
-    catch(error){const raced=await this.store.first('SELECT e.*,w.target_json FROM jwt_v2_snapshot_effects e JOIN jwt_v2_worksets w ON w.work_id=e.work_id WHERE e.snapshot_id=? AND e.record_offset=?',snapshotId,offset);if(!raced)throw error;requireThat(raced.record_digest===row.record_digest&&raced.target_json===row.record_json,'SNAPSHOT_APPLICATION_CONFLICT',409);}
+    catch(error){const raced=await this.store.first('SELECT e.*,w.target_json,w.scope_sub FROM jwt_v2_snapshot_effects e JOIN jwt_v2_worksets w ON w.work_id=e.work_id WHERE e.snapshot_id=? AND e.record_offset=?',snapshotId,offset);if(!raced)throw error;requireThat(raced.record_digest===row.record_digest&&raced.work_id===effect.workId&&raced.target_json===canonical(expected.target)&&(raced.scope_sub??null)===expected.scopeSub,'SNAPSHOT_APPLICATION_CONFLICT',409);}
    }
   }
   return this.finishApplied(snapshotId,{now});
@@ -355,8 +361,9 @@ export class SnapshotReceiver {
   const verified=await this.verify(snapshotId,{now});requireThat(verified.complete,'SNAPSHOT_INCOMPLETE',409);
   const capture=await this.store.first('SELECT * FROM jwt_v2_receive_snapshots WHERE snapshot_id=?',snapshotId);requireThat(capture&&['VERIFIED','APPLIED'].includes(capture.status),'SNAPSHOT_NOT_VERIFIED',409);
   const meta=strictJSON(capture.metadata_json);validateMetadata(meta,this.config,Math.max(now,this.clock()));validateEpoch(meta,this.trust);
-  const applied=await this.store.first("SELECT count(*) n FROM jwt_v2_snapshot_effects e JOIN jwt_v2_receive_records r ON r.snapshot_id=e.snapshot_id AND r.record_offset=e.record_offset AND r.record_digest=e.record_digest JOIN jwt_v2_worksets w ON w.work_id=e.work_id AND w.target_json=r.record_json WHERE e.snapshot_id=? AND w.state='APPLIED'",snapshotId);
-  if(applied.n!==meta.totalRecords)return {status:'VERIFIED',publicationPending:true,snapshotId};
+  let applied=0,offset=-1;
+  for(;;){const rows=await this.store.all('SELECT r.record_offset,r.record_json,r.record_digest,e.record_digest effect_digest,w.target_json,w.scope_sub,w.state FROM jwt_v2_receive_records r LEFT JOIN jwt_v2_snapshot_effects e ON e.snapshot_id=r.snapshot_id AND e.record_offset=r.record_offset LEFT JOIN jwt_v2_worksets w ON w.work_id=e.work_id WHERE r.snapshot_id=? AND r.record_offset>? ORDER BY r.record_offset LIMIT 20',snapshotId,offset);if(!rows.length)break;for(const row of rows){offset=row.record_offset;const expected=snapshotEffect(strictJSON(row.record_json));if(row.record_digest===row.effect_digest&&row.state==='APPLIED'&&row.target_json===canonical(expected.target)&&(row.scope_sub??null)===expected.scopeSub)applied++;}}
+  if(applied!==meta.totalRecords)return {status:'VERIFIED',publicationPending:true,snapshotId};
   const [g,clear]=this.store.guard("SELECT 1 FROM jwt_v2_receive_snapshots WHERE snapshot_id=? AND status IN('VERIFIED','APPLIED')",[snapshotId]);
   const [pending,pendingClear]=this.store.guard("SELECT 1 FROM jwt_v2_receive_requests WHERE request_id=? AND status IN('PENDING','COMPLETE')",[meta.requestId]);
   await this.store.batch([g,pending,this.store.stmt("UPDATE jwt_v2_receive_snapshots SET status='APPLIED' WHERE snapshot_id=?",snapshotId),this.store.stmt("UPDATE jwt_v2_receive_requests SET status='COMPLETE' WHERE request_id=? AND status='PENDING'",meta.requestId),

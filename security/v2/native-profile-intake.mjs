@@ -1,0 +1,46 @@
+import {canonical,exact,requireThat,ascii,safeInt,digest,bytes} from './codec.mjs';
+import {dependencyScope,appliedDependencyPlan} from './issuance-floors.mjs';
+const fields=['academyUserId','revision','pinResetVersion','name','loginId','whatsappNumber','role','active','credentialEpoch'];
+const text=(v,max)=>typeof v==='string'&&v===v.trim()&&bytes(v).length>0&&bytes(v).length<=max&&!/[\u0000-\u001f\u007f]/.test(v);
+function profile(value){exact(value,fields);canonical(value);requireThat(text(value.academyUserId,180)&&text(value.name,160)&&text(value.loginId,160)&&typeof value.whatsappNumber==='string'&&bytes(value.whatsappNumber).length<=32&&['student','teacher','admin'].includes(value.role)&&[0,1].includes(value.active)&&safeInt(value.revision,1)&&safeInt(value.pinResetVersion)&&safeInt(value.credentialEpoch,1),'INVALID_HIFZ_PROFILE_PROJECTION',400);return value;}
+export function createHifzProfileIntake({store,dependenciesFor,dependencyRegistry,profileDependencyId,verifySourceProjection,ensureDependencies}){
+ requireThat(store?.app==='hifz'&&typeof dependenciesFor==='function'&&dependencyRegistry instanceof Map&&ascii(profileDependencyId)&&typeof verifySourceProjection==='function'&&typeof ensureDependencies==='function','AUTHENTICATED_PROFILE_INTAKE_REQUIRED',503);
+ const rule=dependencyRegistry.get(profileDependencyId);requireThat(rule?.ownerApp==='academy'&&rule.recipients?.includes('hifz')&&rule.scope==='ACCOUNT','HIFZ_PROFILE_SOURCE_NOT_REGISTERED',503);
+ return Object.freeze({async apply(request){
+  // The owning business RPC must authenticate the exact complete profile bytes,
+  // source dependency/revision/digest and commit reference. An event MAC alone
+  // does not authenticate an unrelated profile payload.
+  const verified=await verifySourceProjection(request);exact(verified,['profile','target','commitRef','projectionDigest']);
+  const p=profile(verified.profile),target=exact(verified.target,['type','id','ownerEpoch','revision','effect','deniedActions']),scope=dependencyScope(p.academyUserId),hash=await digest(p);
+  requireThat(target?.type==='dependency'&&target.id===profileDependencyId&&target.ownerEpoch===rule.epoch&&target.effect==='INVALIDATE'&&Array.isArray(target.deniedActions)&&target.deniedActions.length===0&&safeInt(target.revision,1)&&hash===verified.projectionDigest&&ascii(verified.commitRef),'HIFZ_PROFILE_SOURCE_BINDING_CONFLICT',409);
+  const row=await store.first('SELECT l.*,s.name,s.login_id,s.whatsapp_number,s.role,s.active,s.credential_epoch,(SELECT count(*) FROM academy_profile_links x WHERE x.student_id=l.student_id) links FROM academy_profile_links l JOIN students s ON s.id=l.student_id WHERE l.academy_user_id=?',p.academyUserId);
+  requireThat(row&&row.links===1,'HIFZ_EXISTING_REVIEWED_LINK_REQUIRED',409);
+  requireThat(p.revision>=row.source_revision&&p.credentialEpoch>=row.source_credential_epoch&&p.pinResetVersion>=row.pin_reset_version,'HIFZ_PROFILE_REVISION_ROLLBACK',409);
+  const prior=await store.first('SELECT * FROM academy_profile_provenance WHERE scope=?',scope);
+  requireThat(!prior||prior.academy_user_id===p.academyUserId&&prior.student_id===row.student_id&&prior.owner_epoch===target.ownerEpoch&&prior.dependency_revision<=target.revision,'HIFZ_PROFILE_PROVENANCE_CONFLICT',409);
+  if(p.revision===row.source_revision&&row.source_credential_epoch>0){
+   const current={academyUserId:row.academy_user_id,revision:row.source_revision,pinResetVersion:row.pin_reset_version,name:row.name,loginId:row.login_id,whatsappNumber:row.whatsapp_number||'',role:row.role,active:row.active,credentialEpoch:row.source_credential_epoch};
+   requireThat(await digest(current)===hash,'HIFZ_PROFILE_SAME_REVISION_CONFLICT',409);
+  }
+  if(prior?.dependency_revision===target.revision){
+   requireThat(prior.projection_digest===hash&&prior.commit_ref===verified.commitRef,'HIFZ_PROFILE_SAME_REVISION_CONFLICT',409);
+   const receipt=await store.first('SELECT * FROM jwt_v2_applied_dependencies WHERE dependency=? AND scope=? AND owner_epoch=?',target.id,scope,target.ownerEpoch);
+   requireThat(receipt&&receipt.revision===target.revision&&receipt.projection_digest===hash&&receipt.commit_ref===verified.commitRef,'HIFZ_PROFILE_RECEIPT_REQUIRED',503);
+   for(const [id,refScope,epoch,revision] of JSON.parse(receipt.native_vector_json)){const current=await store.first('SELECT owner_epoch,revision FROM jwt_v2_dependencies WHERE id=? AND scope=?',id,refScope);requireThat(current&&current.owner_epoch===epoch&&current.revision===revision,'HIFZ_PROFILE_RECEIPT_STALE',409);}
+   return {status:'COMMITTED',sub:p.academyUserId,nativeStudentId:row.student_id,revision:target.revision,commitRef:verified.commitRef,nativeReceiptDigest:receipt.receipt_digest};
+  }
+  await ensureDependencies(p.academyUserId);const refs=dependenciesFor(p.academyUserId),provenanceRef=refs.find(r=>r.id==='hifz:native:academy_profile_provenance'&&r.scope===scope);
+  requireThat(provenanceRef,'HIFZ_PROVENANCE_CAPTURE_REQUIRED',503);
+  const before=await store.first('SELECT revision FROM jwt_v2_dependencies WHERE id=? AND scope=? AND owner_epoch=?',provenanceRef.id,scope,provenanceRef.ownerEpoch);requireThat(before&&safeInt(before.revision,1),'HIFZ_PROVENANCE_CAPTURE_REQUIRED',503);
+  const reset=p.credentialEpoch>row.source_credential_epoch||p.pinResetVersion>row.pin_reset_version,localEpoch=row.credential_epoch+Number(reset);requireThat(safeInt(localEpoch),'NATIVE_CREDENTIAL_EPOCH_EXHAUSTED',503);
+  const [guard,clear]=store.guard('SELECT 1 FROM academy_profile_links l JOIN students s ON s.id=l.student_id WHERE l.academy_user_id=? AND l.student_id=? AND l.source_revision=? AND l.source_credential_epoch=? AND l.pin_reset_version=? AND s.credential_epoch=? AND s.name IS ? AND s.login_id IS ? AND s.whatsapp_number IS ? AND s.role=? AND s.active=? AND (SELECT count(*) FROM academy_profile_links x WHERE x.student_id=l.student_id)=1',[p.academyUserId,row.student_id,row.source_revision,row.source_credential_epoch,row.pin_reset_version,row.credential_epoch,row.name,row.login_id,row.whatsapp_number,row.role,row.active]);
+  const [capture,captureClear]=store.guard("SELECT 1 FROM jwt_v2_dependencies d JOIN jwt_v2_authority_changes c ON c.dependency=d.id AND c.scope=d.scope AND c.owner_epoch=d.owner_epoch AND c.revision=d.revision WHERE d.id=? AND d.scope=? AND d.owner_epoch=? AND d.revision>? AND c.source_table='academy_profile_provenance'",[provenanceRef.id,scope,provenanceRef.ownerEpoch,before.revision]);
+  const statements=[guard,
+   store.stmt('UPDATE students SET name=?,login_id=?,whatsapp_number=?,role=?,active=?,academy_managed=1,credential_epoch=? WHERE id=?',p.name,p.loginId,p.whatsappNumber||null,p.role,p.active,localEpoch,row.student_id),
+   store.stmt('UPDATE academy_profile_links SET source_revision=?,source_credential_epoch=?,pin_reset_version=? WHERE academy_user_id=? AND student_id=?',p.revision,p.credentialEpoch,p.pinResetVersion,p.academyUserId,row.student_id),
+   store.stmt('INSERT INTO academy_profile_provenance VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(scope) DO UPDATE SET dependency_revision=excluded.dependency_revision,profile_revision=excluded.profile_revision,source_credential_epoch=excluded.source_credential_epoch,pin_reset_version=excluded.pin_reset_version,projection_digest=excluded.projection_digest,commit_ref=excluded.commit_ref,payload_json=excluded.payload_json',scope,p.academyUserId,row.student_id,target.ownerEpoch,target.revision,p.revision,p.credentialEpoch,p.pinResetVersion,hash,verified.commitRef,canonical(p)),capture,captureClear,clear];
+  const plan=await appliedDependencyPlan(store,{target,scopeSub:p.academyUserId,dependencyRegistry,projectionDigest:hash,commitRef:verified.commitRef,nativePlan:{statements,references:refs,guard:{table:'academy_profile_provenance',scopeColumn:'scope',ownerEpochColumn:'owner_epoch',revisionColumn:'dependency_revision',projectionDigestColumn:'projection_digest'}}});
+  await store.batch(plan);const committed=await store.first('SELECT receipt_digest FROM jwt_v2_applied_dependencies WHERE dependency=? AND scope=? AND owner_epoch=? AND revision=? AND projection_digest=? AND commit_ref=?',target.id,scope,target.ownerEpoch,target.revision,hash,verified.commitRef);requireThat(committed,'HIFZ_PROFILE_RECEIPT_REQUIRED',503);return {status:'COMMITTED',sub:p.academyUserId,nativeStudentId:row.student_id,revision:target.revision,commitRef:verified.commitRef,nativeReceiptDigest:committed.receipt_digest};
+ }});
+}
+export const hifzProfileIntakeBoundary=Object.freeze({existingLinks:'Only an existing unambiguous reviewed academy_profile_links mapping can change; journals/student IDs are never rekeyed or claimed.',authentication:'A real exact-payload source business verifier and configured authoritative profile dependency are mandatory; no new public endpoint, source event kind or provisioning contract is invented.',credentials:'No PIN/hash member is accepted or written. Original native hashes remain unchanged; a credential/reset advance only fences legacy local token epochs.',receipt:'Actual profile facts, native provenance, registered captured revisions and applied-dependency receipt commit atomically; missing capture fails the whole plan.'});

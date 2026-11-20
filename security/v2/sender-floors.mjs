@@ -1,0 +1,31 @@
+import {canonical,strictJSON,requireThat,safeInt,uuid,digest} from './codec.mjs';
+import {validateEvent} from './events.mjs';
+import {dependencyScope} from './issuance-floors.mjs';
+export const senderFloorSchemaSQL=`
+CREATE TABLE IF NOT EXISTS jwt_v2_sender_facts(event_id TEXT PRIMARY KEY,target_app TEXT NOT NULL CHECK(target_app IN('studio','hifz')),stream TEXT NOT NULL,owner_epoch TEXT NOT NULL,sequence INTEGER NOT NULL CHECK(typeof(sequence)='integer' AND sequence>0 AND sequence<=9007199254740991),digest TEXT NOT NULL CHECK(length(digest)=64),event_json TEXT NOT NULL CHECK(json_valid(event_json)),UNIQUE(target_app,stream,owner_epoch,sequence));
+CREATE INDEX IF NOT EXISTS jwt_v2_sender_fact_dependency ON jwt_v2_sender_facts(target_app,json_extract(event_json,'$.target.id'),json_extract(event_json,'$.sub'),json_extract(event_json,'$.target.ownerEpoch'),json_extract(event_json,'$.target.revision'));
+CREATE TRIGGER IF NOT EXISTS jwt_v2_sender_fact_immutable BEFORE UPDATE ON jwt_v2_sender_facts BEGIN SELECT RAISE(ABORT,'jwt_v2_immutable_sender_coverage'); END;
+CREATE TRIGGER IF NOT EXISTS jwt_v2_sender_fact_retained BEFORE DELETE ON jwt_v2_sender_facts BEGIN SELECT RAISE(ABORT,'jwt_v2_sender_coverage_retained'); END;
+CREATE TRIGGER IF NOT EXISTS jwt_v2_outbox_capture_sender AFTER INSERT ON jwt_v2_outbox WHEN json_valid(NEW.event_json) AND json_extract(NEW.event_json,'$.sourceApp')='academy' BEGIN
+ SELECT CASE WHEN NOT(json_valid(NEW.event_json)) THEN RAISE(ABORT,'jwt_v2_invalid_sender_event') END;
+ SELECT CASE WHEN json_extract(NEW.event_json,'$.schema')<>2 OR json_extract(NEW.event_json,'$.sourceApp')<>'academy' OR json_extract(NEW.event_json,'$.targetApp')<>NEW.target_app OR json_extract(NEW.event_json,'$.eventId')<>NEW.event_id OR json_extract(NEW.event_json,'$.digest')<>NEW.digest THEN RAISE(ABORT,'jwt_v2_invalid_sender_event') END;
+ SELECT CASE WHEN EXISTS(SELECT 1 FROM jwt_v2_sender_facts f WHERE f.event_id=NEW.event_id AND (f.event_json<>NEW.event_json OR f.digest<>NEW.digest OR f.target_app<>NEW.target_app)) THEN RAISE(ABORT,'jwt_v2_sender_coverage_conflict') END;
+ INSERT INTO jwt_v2_sender_facts(event_id,target_app,stream,owner_epoch,sequence,digest,event_json) VALUES(NEW.event_id,NEW.target_app,json_extract(NEW.event_json,'$.stream'),json_extract(NEW.event_json,'$.ownerEpoch'),json_extract(NEW.event_json,'$.sequence'),NEW.digest,NEW.event_json) ON CONFLICT(event_id) DO NOTHING;
+END;
+CREATE VIEW IF NOT EXISTS jwt_v2_sender_history AS SELECT event_id,target_app,stream,owner_epoch,sequence,digest,event_json FROM jwt_v2_sender_facts UNION SELECT event_id,target_app,json_extract(event_json,'$.stream') stream,json_extract(event_json,'$.ownerEpoch') owner_epoch,json_extract(event_json,'$.sequence') sequence,digest,event_json FROM jwt_v2_outbox WHERE json_extract(event_json,'$.sourceApp')='academy';
+`;
+// Splice these statements into the SAME owning native head transaction, with its
+// actual coherent-source/head-CAS guards. This never creates an Academy floor.
+export async function sourceAuthorityEventPlan(runtime,{target,sub,targetApp='studio',stream='account-security',operationId=crypto.randomUUID(),commitRef,now=runtime.clock()}){
+ requireThat(runtime.app==='academy'&&target?.type==='dependency'&&target.effect==='INVALIDATE'&&Array.isArray(target.deniedActions)&&target.deniedActions.length===0&&uuid(operationId)&&safeInt(now),'SOURCE_AUTHORITY_EVENT_REQUIRED',503);dependencyScope(sub);requireThat(typeof sub==='string','SOURCE_ACCOUNT_SCOPE_REQUIRED',503);
+ const {runtimeServices}=await import('./runtime-service.mjs'),services=await runtimeServices(runtime),rule=services.registry.dependencies.get(target.id);
+ requireThat(rule?.scope==='ACCOUNT'&&rule.recipients?.includes(targetApp),'SOURCE_AGGREGATE_NOT_REGISTERED',503);
+ const known=await runtime.store.first("SELECT event_json FROM jwt_v2_sender_facts WHERE target_app=? AND stream=? AND json_extract(event_json,'$.sub')=? AND json_extract(event_json,'$.target.id')=? AND json_extract(event_json,'$.target.ownerEpoch')=? AND json_extract(event_json,'$.target.revision')=?",targetApp,stream,sub,target.id,target.ownerEpoch,target.revision);
+ if(known){const event=strictJSON(known.event_json);await validateEvent(event,{env:runtime.config.env,targetApp,streams:services.streamMap(targetApp),dependencies:services.registry.dependencies});requireThat(canonical(event.target)===canonical(target)&&event.commitRef===commitRef,'SOURCE_AGGREGATE_EVENT_CONFLICT',409);return {event,statements:[]};}
+ const ledger=await runtime.store.first('SELECT * FROM jwt_v2_sender_streams WHERE target_app=? AND stream=?',targetApp,stream);requireThat(ledger&&safeInt(ledger.next_sequence+1,1)&&services.registry.streams.some(s=>s.targetApp===targetApp&&s.stream===stream&&s.ownerEpoch===ledger.owner_epoch),'SOURCE_STREAM_NOT_INSTALLED',503);
+ const event={schema:2,env:runtime.config.env,sourceApp:'academy',targetApp,eventId:crypto.randomUUID(),operationId,stream,ownerEpoch:ledger.owner_epoch,sequence:ledger.next_sequence,sub,kind:'authority-updated',target,committedAt:now,commitRef};event.digest=await digest(event);
+ await validateEvent(event,{env:runtime.config.env,targetApp,streams:services.streamMap(targetApp),dependencies:services.registry.dependencies});
+ const [guard,clear]=runtime.store.guard('SELECT 1 FROM jwt_v2_sender_streams WHERE target_app=? AND stream=? AND owner_epoch=? AND next_sequence=?',[targetApp,stream,ledger.owner_epoch,ledger.next_sequence]);
+ return {event,statements:[guard,runtime.store.stmt('UPDATE jwt_v2_sender_streams SET next_sequence=next_sequence+1 WHERE target_app=? AND stream=?',targetApp,stream),runtime.store.stmt('INSERT INTO jwt_v2_outbox(event_id,event_json,digest,target_app) VALUES(?,?,?,?)',event.eventId,canonical(event),event.digest,targetApp),clear]};
+}
+export const senderFloorBoundary=Object.freeze({coverage:'Immutable recipient/stream/epoch/sequence/event/digest journal shares the originating transaction; delivery outbox loss alone does not erase floors.',loss:'Total operational coverage loss fails closed. No watermark-only coverage, APPLIED-by-head, deletion or compaction.',publication:'Sender aggregate append never invalidates unrelated Academy families or invents a native grant.'});

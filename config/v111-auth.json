@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "release": "V111-milestone2",
+  "release": "V111-milestone3",
   "app": "hifz",
   "env": "production",
   "publicOrigin": "https://mahadarwa-hifz.ummabbadacademy.app",
@@ -13,5 +13,9 @@
     "defaultInactivityMinutes": 90
   },
   "deploymentApproval": "REQUIRED",
-  "providerAlias": "ummabbadacademy.hifz-helper.app"
+  "providerAlias": "ummabbadacademy.hifz-helper.app",
+  "snapshotSchema": 3,
+  "contractAmendments": [
+    "R7-A1"
+  ]
 }

@@ -42,18 +42,20 @@ const SCREENS_BUILT = { home: true, journal: true, logDetail: true, admin: true,
 const SCREEN_LABELS = { progress: 'Progress' };
 
 async function showScreen(id, param){
+  const v2=Boolean(globalThis.HifzV111?.active),client=globalThis.HifzV111?.client;let viewTicket;if(v2){await globalThis.HifzV111.session.ensureFresh();viewTicket=client.beginView();}
   if(typeof updateHifzNavigation==='function')updateHifzNavigation(id);
   document.querySelectorAll('#appContent > .screen').forEach(s => s.classList.add('hidden'));
   // V4.2.15.8: the configured class Zoom action follows the authenticated
   // band itself, so every routed app screen keeps the same centred action.
   if(typeof updateAuthBandZoom === 'function') updateAuthBandZoom();
   const target = document.getElementById('screen-' + id) || document.getElementById('screen-placeholder');
+  if(v2){target.style.visibility='hidden';target.inert=true;}
 
   if(!SCREENS_BUILT[id]){
     document.getElementById('placeholderLabel').textContent = SCREEN_LABELS[id] || id;
     target.classList.remove('hidden');
     fixScreenTopPaint('placeholder');
-    return;
+    if(v2){client.assertView(viewTicket);target.style.visibility='';target.inert=false;}return;
   }
   target.classList.remove('hidden');
   // V3.71.0: read-only is applied HERE, on the single path every caller of
@@ -104,6 +106,7 @@ async function showScreen(id, param){
   // for whichever screen is actually showing (both branches above), so no
   // future new screen can reintroduce this gap.
   fixScreenTopPaint(id);
+  if(v2){client.assertView(viewTicket);target.style.visibility='';target.inert=false;}
 }
 
 // Safari-only "invisible until scroll" bug: the V3.4.3 CSS-only attempt
@@ -165,6 +168,7 @@ async function bootApp(){
     // cross-account guard intact without mistaking "index.html" for an ID.
     const expectedId = getEffectiveLoginId();
     if(!profile.id || !profile.login_id || (expectedId && expectedId !== profile.login_id)){
+      if(Boolean(globalThis.HifzV111?.active)){await globalThis.HifzV111.switchAccount();return;}
       clearToken();
       routeToLoginScreen();
       return;
@@ -172,7 +176,7 @@ async function bootApp(){
     // Also upgrades an already-authenticated V3.8.0 session: once the
     // verified profile is known, remember its ID even if that login happened
     // before V3.8.1's apiLogin() persistence existed.
-    rememberLoginId(profile.login_id);
+    if(!Boolean(globalThis.HifzV111?.active))rememberLoginId(profile.login_id);
     // V3.78.0: the shared day boundary and the tag vocabulary, for every
     // role — the PJ cards carry the tajweed picker too. The timezone comes
     // free on the profile; the vocabulary is one small fetch, awaited so no
@@ -181,7 +185,7 @@ async function bootApp(){
     if(typeof setMaktabZoomLink === 'function') setMaktabZoomLink(profile.maktab_zoom_link || null);
     await loadTajweedVocabulary();
     // V3.77.0 (j): this account is now one the device knows, for the switcher.
-    rememberKnownAccount({ id: profile.login_id, name: profile.name, role: profile.role });
+    if(!Boolean(globalThis.HifzV111?.active))rememberKnownAccount({ id: profile.login_id, name: profile.name, role: profile.role });
     currentUser = { id: profile.id, loginId: profile.login_id, academyManaged: !!(profile.academy_managed || profile.academy_profiles_only), name: profile.name || '', role: profile.role || 'student', trackHaidh: !!profile.track_haidh };
     setupAuthBandAndDropdown(); // must run AFTER currentUser.role is known — it renders the nav based on it
     renderAuthBand();
@@ -202,14 +206,16 @@ async function bootApp(){
     // (V3.70.0), so sending a teacher there would land them on a screen
     // with no way out.
     if(typeof isTeachingProfile === 'function' && isTeachingProfile()){
-      showScreen(homeScreenFor());
+      if(Boolean(globalThis.HifzV111?.active))await showScreen(homeScreenFor());else showScreen(homeScreenFor());
     } else {
       // V4.2.15.8: a Personal Journal opens on Summary. Home remains an
       // explicit menu destination; incomplete setup still opens Settings.
-      showScreen(profile.setup_complete ? 'journal' : 'settings');
+      if(Boolean(globalThis.HifzV111?.active))await showScreen(profile.setup_complete ? 'journal' : 'settings');else showScreen(profile.setup_complete ? 'journal' : 'settings');
     }
+    return true;
   } catch(e){
     showBanner("Couldn't load your profile: " + e.message);
+    if(Boolean(globalThis.HifzV111?.active)){globalThis.HifzV111.showAccess('Your profile is unavailable. Private information remains masked.');return;}
     clearToken();
     routeToLoginScreen();
   }
@@ -237,6 +243,7 @@ window.addEventListener('popstate', () => {
     showBanner('Press back again to log out.');
     history.pushState({ hifzhelperGuard: true }, '', location.href);
   } else {
+    if(Boolean(globalThis.HifzV111?.active)){void globalThis.HifzV111.logout();return;}
     clearToken();
     routeToLoginScreen();
   }
@@ -287,6 +294,7 @@ window.addEventListener('popstate', () => {
     btn.addEventListener('click', () => showScreen(homeScreenFor()));   // V4.1.1
   });
 
+  if(Boolean(globalThis.HifzV111?.active)){await globalThis.HifzV111.start();return;}
   if(typeof handleAcademyHandoff==='function'&&await handleAcademyHandoff())return;
   if(getToken()){
     bootApp();

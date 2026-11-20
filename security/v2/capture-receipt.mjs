@@ -1,3 +1,4 @@
+import {dependencyScope} from './issuance-floors.mjs';
 import {canonical,requireThat,ascii,safeInt,bytes,b64u,sha256,vectorDigest,digest} from './codec.mjs';
 export async function vectorFromGuards(guards){
  requireThat(Array.isArray(guards)&&guards.length>0&&guards.length<=256,'AUTHORITATIVE_VECTOR_REQUIRED',503);
@@ -24,5 +25,5 @@ export async function assertCaptureReceipt({capture,binding,projection,guards,ma
 }
 export function manifestForSubject(registry,sub,ownerEpoch){
  requireThat(registry?.schema===2&&typeof sub==='string'&&ascii(ownerEpoch),'INVALID_DEPENDENCY_MANIFEST',503);
- return Object.entries(registry.rules).map(([table,rule])=>({id:registry.app+':native:'+table,scope:rule.accountColumn?'ACCOUNT:'+sub.replace(/[a-z]/g,c=>c.toUpperCase()):'GLOBAL',ownerEpoch}));
+ return Object.entries(registry.rules).map(([table,rule])=>({id:registry.app+':native:'+table,scope:rule.accountColumn?dependencyScope(sub):'GLOBAL',ownerEpoch}));
 }

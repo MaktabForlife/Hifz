@@ -1,3 +1,4 @@
+import {createHifzV2Handler} from './hifz-v2.js';
 /* Hifzhelper build 5.1 | worker/src/index.js */
 import { json, error } from './utils.js';
 import {headerDate} from './header-date.js';
@@ -35,8 +36,7 @@ function respond(result) {
   return json(result.data);
 }
 
-export default {
-  async fetch(request, env, ctx) {
+export async function dispatchNative(request, env, ctx, verifiedActor = null) {
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         headers: {
@@ -73,7 +73,7 @@ export default {
       }
 
       // Everything past this point requires a valid token.
-      const auth = await authenticate(request, env);
+      const auth = verifiedActor || await authenticate(request, env);
       if (!auth) return error('Not authenticated', 401);
 
       // V2: four independent logs, replacing the old single /entries route.
@@ -186,8 +186,12 @@ export default {
     } catch (err) {
       // Never let an unexpected error look like a normal empty response —
       // surface it. (CONVENTIONS.md principle 3.)
-      console.error('Unhandled error:', err);
+      if (!verifiedActor) console.error('Unhandled error:', err);
       return error('Internal error', 500);
     }
   }
-};
+const v2=createHifzV2Handler({dispatchNative,runtimeFactory:async env=>{
+ const {runtimeFor}=await import('../../security/v2/runtime.mjs');
+ return runtimeFor(env,{app:'hifz'});
+}});
+export default {fetch(request,env,ctx){return env.UAA_V2_ENABLED==='1'?v2(request,env,ctx):dispatchNative(request,env,ctx);}};

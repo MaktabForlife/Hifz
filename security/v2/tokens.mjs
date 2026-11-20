@@ -90,3 +90,9 @@ export async function preverifyAPI(token,{config,keys,now}){
  signatureReceipts.set(selector,{token,config,keys,key:keys.get(header.kid),profile:'api',claims});
  return selector; // authenticated selector only, no authority before current durable controls.
 }
+
+export function refreshOnlyCookie({app,refresh,now,originalExpires}){
+ requireThat(COOKIES[app]&&safeInt(now)&&safeInt(originalExpires)&&originalExpires>now&&originalExpires<=now+604800,'INVALID_COOKIE_DEADLINE',503);unb64u(refresh,32);
+ return COOKIES[app][1]+'='+refresh+'; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age='+(originalExpires-now)+'; Expires='+new Date(originalExpires*1000).toUTCString();
+}
+export function clearCookies(app){requireThat(COOKIES[app],'INVALID_CONFIG',503);return COOKIES[app].map(name=>name+'=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT');}

@@ -82,7 +82,7 @@ function makeMaktabLogClient(path){
       const id = logCtxStudentId();
       return apiFetch(path + '?student_id=' + encodeURIComponent(id) + (since ? '&since=' + encodeURIComponent(since) : ''));
     },
-    getForDate: (date) => apiFetch(path + '?student_id=' + encodeURIComponent(logCtxStudentId()) + '&date=' + encodeURIComponent(date)).catch(() => []),
+    getForDate: (date) => Boolean(globalThis.HifzV111?.active)?apiFetch(path + '?student_id=' + encodeURIComponent(logCtxStudentId()) + '&date=' + encodeURIComponent(date)):apiFetch(path + '?student_id=' + encodeURIComponent(logCtxStudentId()) + '&date=' + encodeURIComponent(date)).catch(() => []),
     save: (entry) => apiFetch(path, { method: 'POST', body: JSON.stringify(Object.assign({ student_id: logCtxStudentId() }, entry)) }),
     update: (id, fields) => apiFetch(path, { method: 'PATCH', body: JSON.stringify(Object.assign({ id }, fields)) }),
     remove: (id) => apiFetch(path + '?id=' + encodeURIComponent(id), { method: 'DELETE' }),
