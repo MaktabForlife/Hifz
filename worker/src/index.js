@@ -1,3 +1,5 @@
+import {runChildSecurityTick} from '../../security/v2/child-security-tick.mjs';
+import {heldForV111Cutover, cutoverUnavailable} from '../../security/v2/cutover-state.mjs';
 import {createHifzV2Handler} from './hifz-v2.js';
 /* Hifzhelper build 5.1 | worker/src/index.js */
 import { json, error } from './utils.js';
@@ -194,4 +196,10 @@ const v2=createHifzV2Handler({dispatchNative,runtimeFactory:async env=>{
  const {runtimeFor}=await import('../../security/v2/runtime.mjs');
  return runtimeFor(env,{app:'hifz'});
 }});
-export default {fetch(request,env,ctx){return env.UAA_V2_ENABLED==='1'?v2(request,env,ctx):dispatchNative(request,env,ctx);}};
+export default {
+  fetch(request, env, ctx) {
+    if (heldForV111Cutover(env)) return cutoverUnavailable();
+    return env.UAA_V2_ENABLED === '1' ? v2(request, env, ctx) : dispatchNative(request, env, ctx);
+  },
+  scheduled: (event, env) => runChildSecurityTick(event, env, 'hifz'),
+};
