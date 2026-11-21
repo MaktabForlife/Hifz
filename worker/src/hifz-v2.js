@@ -46,8 +46,11 @@ export function createHifzV2Handler({runtimeFactory,dispatchNative}) {
    let shell=path==='/'||path==='/index.html'||path==='/academy'||(/^\/[A-Za-z0-9]{4,64}$/.test(path)&&!nativePaths.has(path)&&!/^\/(?:api|auth|internal|worker|security|config|tests|public|assets|admin)$/i.test(path));
    let publicPath=path;
    if(path.startsWith('/_assets/')){
-    const prefix=env.UAA_V2_PUBLIC_ASSET_PREFIX;
-    if(typeof prefix!=='string'||!/^\/_assets\/[0-9a-f]{64}\/$/.test(prefix)||!path.startsWith(prefix))return fail('NOT_FOUND',404);
+    const configured=env.UAA_V2_PUBLIC_ASSET_PREFIX;
+    const prefixes=typeof configured==='string'?configured.split(',',3):[];
+    if(prefixes.length>2||prefixes.some(prefix=>!/^\/_assets\/[0-9a-f]{64}\/$/.test(prefix)))return fail('NOT_FOUND',404);
+    const prefix=prefixes.find(candidate=>path.startsWith(candidate));
+    if(!prefix)return fail('NOT_FOUND',404);
     publicPath='/'+path.slice(prefix.length);if(publicPath==='/index.html')shell=true;
     if(!publicPaths.has(publicPath))return fail('NOT_FOUND',404);
    }

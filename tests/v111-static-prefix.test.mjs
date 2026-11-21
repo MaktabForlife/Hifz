@@ -5,3 +5,20 @@ test('Hifz accepts only the configured candidate prefix plus an existing public 
 test('missing, invalid and mismatched prefix fail closed for hashed assets while ordinary public paths remain unchanged',async()=>{for(const flag of [null,'/_assets/'+'A'.repeat(64)+'/',prefix.slice(0,-1),prefix+'extra/','/_assets/'+'b'.repeat(64)+'/']){const f=setup(flag),denied=await f.run(prefix+'js/v111-session.js');assert.equal(denied.status,404);assert.equal(f.calls.length,0);assert.equal((await f.run('/js/v111-session.js')).status,200);assert.equal(f.calls.length,1);}});
 test('versioned APIs, source/database/private paths, unknown leaves, traversal and service workers never reach ASSETS',async()=>{const f=setup();for(const leaf of ['api/profile','api/admin/users','admin/users','internal/auth/v2/events','security/v2/runtime.mjs','worker/src/index.js','database.sqlite','config/secrets.json','js/not-registered.js','js/sw.js','index.html/extra','/js/v111-session.js','%2e%2e%2fsecurity/v2/runtime.mjs']){const response=await f.run(prefix+leaf);assert([400,404].includes(response.status),leaf+':'+response.status);}assert.equal(f.calls.length,0);assert.equal(f.auth.length,0);});
 test('candidate static methods/origin and MIME checks retain the existing boundary',async()=>{const f=setup();assert.equal((await f.run(prefix+'js/v111-session.js','POST')).status,405);assert.equal((await f.run(prefix+'js/v111-session.js','GET','https://ummabbadacademy.app')).status,421);assert.equal(f.calls.length,0);f.env.ASSETS.fetch=async()=>new Response('<html>',{headers:{'Content-Type':'text/html'}});const mismatch=await f.run(prefix+'js/v111-session.js');assert.equal(mismatch.status,503);assert.equal((await mismatch.json()).code,'ASSET_TYPE_MISMATCH');});
+
+test('current and previous approved Hifz prefixes serve exact public files and deny third or malformed prefixes',async()=>{
+ const previous='/_assets/'+'b'.repeat(64)+'/',unknown='/_assets/'+'c'.repeat(64)+'/';
+ const leaf='js/v111/browser-session.mjs';
+ const enabled=setup(prefix+','+previous);
+ assert.equal((await enabled.run(prefix+leaf)).status,200);
+ assert.equal((await enabled.run(previous+leaf)).status,200);
+ assert.deepEqual(enabled.calls,[prefix+leaf,previous+leaf]);
+ assert.equal((await enabled.run(unknown+leaf)).status,404);
+ for(const configured of [prefix+','+previous+','+unknown,prefix+',',prefix+',invalid']){
+  const invalid=setup(configured);
+  assert.equal((await invalid.run(prefix+leaf)).status,404);
+  assert.equal(invalid.calls.length,0);
+ }
+ assert.equal((await enabled.run(previous+'js/sw.js')).status,404);
+ assert.equal(enabled.auth.length,0);
+});
