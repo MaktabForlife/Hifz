@@ -1,9 +1,10 @@
+import {registryControlPlan,sourceControlPlan} from './control-publication.mjs';
 import {ascii,requireThat,safeInt,strictJSON,uuid} from './codec.mjs';
 import {serviceFetch} from './http-service.mjs';
 import {deliverOutbox} from './outbox.mjs';
 import {runtimeServices} from './runtime-service.mjs';
 import {
- prepareUpdateBoundary,listUpdateSubjects,revokeOfflineAcademyAccount,publishUpdateSessions,verifyUpdateBoundary
+ prepareUpdateBoundary,listUpdateSubjects,revokeOfflineAcademyAccount,publishUpdateSessions,verifyUpdateBoundary,requireVerifiedUpdateBoundary
 } from './update-boundary.mjs';
 
 async function deliver(runtime,limit=4){
@@ -45,12 +46,42 @@ async function reconcile(runtime,{requestId,pageToken=null}){
  return {snapshotId:page.snapshotId,nextPageToken:page.nextPageToken,applied:ready?.status==='APPLIED'};
 }
 
+async function publishSharedRegistry(runtime,generation){
+ await requireVerifiedUpdateBoundary(runtime);
+ const registry=runtime.settings.sharedAcademy;
+ requireThat(registry?.revision===1&&(runtime.app==='academy'
+  ?runtime.settings.sharedAcademySessions===true&&registry.signingKey
+  :runtime.settings.raw.sharedChildEntry&&registry.signingKey===null),'SHARED_KEY_REGISTRY_REQUIRED',503);
+ const suffix='control/app',store=runtime.store;
+ const target=await store.first('SELECT projection_json FROM jwt_v2_control_targets WHERE app=? AND env=? AND suffix=?',
+  runtime.app,runtime.config.env,suffix);
+ requireThat(target,'CONTROL_SOURCE_NOT_COMMITTED',503);
+ const current=strictJSON(target.projection_json),receiptRef='offline-shared-registry-'+generation;
+ let next=current;
+ if(current.sharedAcademyRegistryRevision===undefined){
+  next={...current,cr:current.cr+1,sharedAcademyRegistryRevision:registry.revision,withdrawnSharedAcademyKids:[]};
+  const update=await registryControlPlan(store,{registry:next,receiptRef,
+   predecessor:{epoch:current.keyRegistryEpoch,revision:current.keyRegistryRevision}});
+  await store.batch(update.statements);
+  const commit=await sourceControlPlan(store,{suffix,projection:next,expectedCR:current.cr,commitRef:receiptRef});
+  await store.batch(commit.statements);
+ }else requireThat(current.sharedAcademyRegistryRevision===registry.revision
+  &&Array.isArray(current.withdrawnSharedAcademyKids)&&!current.withdrawnSharedAcademyKids.includes(registry.kid),
+  'SHARED_KEY_REGISTRY_CONFLICT',409);
+ await runtime.cache.publish(suffix,async()=>next);
+ const published=await runtime.appControl();
+ requireThat(published.cr===next.cr&&published.sharedAcademyRegistryRevision===registry.revision
+  &&!published.withdrawnSharedAcademyKids.includes(registry.kid),'SHARED_KEY_REGISTRY_NOT_PUBLISHED',503);
+ return {status:'VERIFIED',revision:registry.revision,controlRevision:published.cr};
+}
+
 // This function is called only by the named, binding-only Worker entrypoint.
 export async function runOfflineUpdateStep(runtime,command){
  const pinned=runtime.settings.raw.offlineUpdate,generation=command?.generation;
  requireThat(runtime.env.UAA_V111_CUTOVER==='held'&&pinned&&generation===pinned.generation
   &&command.releaseId===pinned.releaseId,'OFFLINE_UPDATE_HOLD_REQUIRED',409);
  switch(command.action){
+  case 'publishSharedRegistry':return publishSharedRegistry(runtime,generation);
   case 'prepare':return prepareUpdateBoundary(runtime,pinned);
   case 'inventory':return listUpdateSubjects(runtime,{generation,after:command.after,limit:command.limit});
   case 'revokeAccount':{
