@@ -84,12 +84,12 @@ export class AcademyCeremonies {
   // Academy must not extend the deadline already fixed by the child's transaction.
   requireThat(expiresAt===undefined||safeInt(expiresAt),'INVALID_CEREMONY_EXPIRY',400);
   const deadline=expiresAt===undefined?now+300:Math.min(expiresAt,now+300);
-  requireThat(deadline>now,'CEREMONY_EXPIRED',409);
   const old=await this.store.first('SELECT * FROM jwt_v2_ceremonies WHERE tx=?',tx);
   if(old){
-   requireThat(old.purpose===purpose&&old.target_app===targetApp&&old.expected_json===(expected===null?null:canonical(expected))&&old.state_hash===stateHash&&old.challenge===challenge&&old.callback===callback&&old.return_to===returnTo&&(expiresAt===undefined||old.expires_at===Math.min(expiresAt,old.created_at+300)),'CEREMONY_CONFLICT',409);
+   requireThat(old.purpose===purpose&&old.target_app===targetApp&&old.expected_json===(expected===null?null:canonical(expected))&&old.state_hash===stateHash&&old.challenge===challenge&&old.callback===callback&&old.return_to===returnTo&&(expiresAt===undefined||old.expires_at<=Math.min(expiresAt,old.created_at+300)),'CEREMONY_CONFLICT',409);
    return {tx,expiresAt:old.expires_at,status:old.status};
   }
+  requireThat(deadline>now,'CEREMONY_EXPIRED',409);
   await this.store.stmt('INSERT INTO jwt_v2_ceremonies(tx,purpose,target_app,expected_json,state_hash,challenge,callback,return_to,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?)',tx,purpose,targetApp,expected===null?null:canonical(expected),stateHash,challenge,callback,returnTo,now,deadline).run();
   return {tx,expiresAt:deadline,status:'PENDING'};
  }

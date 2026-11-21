@@ -3,6 +3,8 @@
  'use strict';
  if(document.querySelector('meta[name="hifz-auth-mode"]')?.content!=='v2')return;
  const origin='https://mahadarwa-hifz.ummabbadacademy.app';
+ let academyEntry=location.origin===origin&&location.pathname==='/'&&location.search==='?academy-entry=1'&&!location.hash;
+ if(academyEntry)history.replaceState(history.state,'','/');
  const state={active:true,session:null,drafts:null,client:null,lastState:null};
  globalThis.HifzV111=state;
  const prepared=new Set(),restorable=new Map();let checkpoint=Promise.resolve();
@@ -35,12 +37,13 @@
   const pending=state.session?.switchAccount();discardNative();state.showAccess('This browser is cleared. Choose the replacement account through Academy.');
   const result=await pending;if(result?.navigateUrl)location.assign(result.navigateUrl);
  };
- state.journey=async()=>{
+ let journeyFlight=null;
+ state.journey=()=>journeyFlight??=(async()=>{
   await state.ready;
   const result=state.session.getContext()?await state.session.beginUnlock({returnTo:'/'}):await state.session.beginAdmission({returnTo:'/'});
   if(!result?.navigateUrl)throw new Error('Academy sign-in is temporarily unavailable.');
   const target=new URL(result.navigateUrl);if(target.origin!=='https://ummabbadacademy.app')throw new Error('Academy sign-in address is unavailable.');location.assign(target.href);
- };
+ })().finally(()=>{journeyFlight=null;});
  state.recover=async resource=>{
   await state.ready;
   let host=document.getElementById('hifzV2Recovery');if(!host){host=document.createElement('section');host.id='hifzV2Recovery';document.body.appendChild(host);}host.replaceChildren();
@@ -78,8 +81,16 @@
 
 })();
  state.start=async()=>{
-  await state.ready;
+  const current=await state.ready;
   try{
+   if(academyEntry){
+    academyEntry=false;
+    if(['SIGNED_OUT','LOCKED','ADMITTED_LOCKED'].includes(current?.state)){
+     state.showAccess('Continuing through Academy…');
+     await state.journey();
+     return;
+    }
+   }
    await state.session.ensureFresh();
    const ticket=state.client.beginView(),loaded=await bootApp();
    if(loaded!==true||!state.session.getContext())return;

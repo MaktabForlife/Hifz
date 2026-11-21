@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
+import {readFileSync} from 'node:fs';
+import {runInNewContext} from 'node:vm';
 import {createBrowserSession} from '../security/v2/browser-session.mjs';
 import {createBrowserDrafts} from '../security/v2/browser-drafts.mjs';
 import {createHifzClient} from '../js/v111-client.mjs';
@@ -32,4 +34,46 @@ await check('lost response retains encrypted marker with no automatic retry',asy
 await check('fresh real SDK reconciliation preserves unknown partial state',async()=>{const result=await client.recover('hifz:/sabaq:own');assert.equal(result.automaticReplayAllowed,false);assert.equal(result.views.journals['/sabaq'][0].student_comment,'checked partial effect');assert.equal((await drafts.recoveryMarker('hifz:/sabaq:own')).state,'SAVE_OUTCOME_UNKNOWN');assert.equal(effects,1);});
 await check('failed real SDK reconciliation never becomes empty success',async()=>{mode='unavailable';await assert.rejects(()=>client.recover('hifz:/sabaq:own'));assert.equal((await drafts.recoveryMarker('hifz:/sabaq:own')).state,'SAVE_OUTCOME_UNKNOWN');mode='success';});
 await check('real SDK logout clear masks before asynchronous encrypted discard',async()=>{const pending=session.clearAvailable();assert.equal(masked,true);assert.equal(session.getContext(),null);await pending;assert.equal(storeRows.size,0);});
+
+await check('only the dashboard Hifz link starts one Academy continuation when needed',async()=>{
+ const source=readFileSync(new URL('../js/v111-session.js',import.meta.url),'utf8');
+ const origin='https://mahadarwa-hifz.ummabbadacademy.app';
+ for(const [search,state,expected] of [
+  ['?academy-entry=1','SIGNED_OUT','admission'],
+  ['?academy-entry=1','ADMITTED_LOCKED','unlock'],
+  ['?academy-entry=1','UNLOCKED',null],
+  ['','SIGNED_OUT',null],
+  ['?academy-entry=1&other=1','SIGNED_OUT',null]
+ ]){
+  const calls=[],panel={},status={},stateChange=state!=='SIGNED_OUT',historyPaths=[];
+  const journey=kind=>async options=>{
+   assert.equal(options.returnTo,'/');
+   calls.push(kind);return {navigateUrl:'https://ummabbadacademy.app/auth/v2/'+kind+'?tx=fixture'};
+  };
+  const session={
+   bootstrap:async()=>({state}),
+   ensureFresh:async()=>{if(state!=='UNLOCKED')throw Error('PIN_REQUIRED');},
+   getContext:()=>stateChange?{}:null,
+   beginAdmission:journey('admission'),beginUnlock:journey('unlock'),
+   reveal(){}
+  };
+  const scope={
+   URL,location:{origin,pathname:'/',search,hash:'',assign:href=>calls.push(new URL(href).pathname)},
+   history:{replaceState(state,title,path){historyPaths.push(path);}},
+   document:{querySelector:()=>({content:'v2'}),createElement:()=>({}),head:{appendChild(){}},documentElement:{setAttribute(){}},
+    getElementById:id=>id==='hifzV2Access'?panel:status,addEventListener(){}},
+   addEventListener(){},fetch(){throw Error('unexpected request');},bootApp:async()=>true,
+   loadModule:async path=>({
+    '/js/v111/browser-session.mjs':{createBrowserSession:()=>session},
+    '/js/v111/browser-drafts.mjs':{createBrowserDrafts:()=>({})},
+    '/js/v111-client.mjs':{createHifzClient:()=>({ beginView:()=>({context:{}}),assertView(){} })}
+   })[path]
+  };
+  runInNewContext(source.replaceAll('import(', 'loadModule('),scope);
+  await scope.HifzV111.start();
+  await scope.HifzV111.start();
+  assert.deepEqual(historyPaths,search==='?academy-entry=1'?['/']:[]);
+  assert.deepEqual(calls,expected?[expected,'/auth/v2/'+expected]:[]);
+ }
+});
 session.dispose();console.log(passed+' passed, '+failed+' failed');if(failed)process.exitCode=1;
