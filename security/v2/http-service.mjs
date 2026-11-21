@@ -32,7 +32,7 @@ export async function handleServiceHTTP(runtime,request,ctx){
  peers.set(request,Object.freeze({sourceApp:peer.sourceApp,targetApp:peer.targetApp,env:peer.env,path,keyId:peer.kid}));
  const body=strictJSON(raw);
  if(path.endsWith('/transactions')){
-  exact(body,['tx','purpose','targetApp','expected','stateHash','challenge','callback','returnTo']);
+  exact(body,['tx','purpose','targetApp','expected','stateHash','challenge','callback','returnTo',...(body&&Object.hasOwn(body,'expiresAt')?['expiresAt']:[])]);
   requireThat(runtime.app==='academy'&&body.targetApp===peer.sourceApp,'CEREMONY_SERVICE_DIRECTION',403);
   const ceremonies=runtime.getCeremonies?await runtime.getCeremonies():await runtime.ceremonies;requireThat(ceremonies?.register,'CEREMONY_SERVICE_UNAVAILABLE',503);
   return response(await ceremonies.register({request,...body}));

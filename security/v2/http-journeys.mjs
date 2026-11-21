@@ -49,7 +49,7 @@ export async function startJourney(runtime,request,body,purpose){
  pendingAuth.set(request,{tx,csrfHash:await digest(finalProof)});
  const local=await consumer(runtime,request);
  await local.registerPending({request,tx,purpose,expected,operationId,expiresAt});
- const reply=await serviceFetch(runtime,{targetApp:'academy',path:'/internal/auth/v2/transactions',operationId:auth.row.operation_id,body:{tx,purpose,targetApp:runtime.app,expected,stateHash,challenge:body.challenge,callback:body.callback,returnTo}});
+ const reply=await serviceFetch(runtime,{targetApp:'academy',path:'/internal/auth/v2/transactions',operationId:auth.row.operation_id,body:{tx,purpose,targetApp:runtime.app,expected,stateHash,challenge:body.challenge,callback:body.callback,returnTo,expiresAt}});
  requireThat(reply.tx===tx&&reply.expiresAt<=expiresAt,'CEREMONY_SERVICE_CONFLICT',503);
  const [g,c]=transactions.guard(auth.row);
  await runtime.store.batch([g,runtime.store.stmt("UPDATE jwt_v2_http_transactions SET status='COMMITTED',result_json=? WHERE tx=?",canonical({tx,operationId}),auth.row.tx),c]);

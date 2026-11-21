@@ -74,21 +74,24 @@ export class AcademyCeremonies {
   const authorisation=await this.authorisePinRequest(request,tx);
   requireThat(authorisation&&/^[0-9a-f]{64}$/.test(authorisation.csrfHash),'CEREMONY_CSRF',403);return authorisation;
  }
- async register({request,tx,purpose,targetApp,expected=null,stateHash,challenge,callback,returnTo}){
+ async register({request,tx,purpose,targetApp,expected=null,stateHash,challenge,callback,returnTo,expiresAt}){
   const now=this.clock();atLeast(now);requireThat(uuid(tx)&&TYPES.includes(purpose)&&APP.includes(targetApp),'INVALID_CEREMONY',400);
   requireThat(await this.authoriseChild(request,targetApp),'CHILD_SERVICE_AUTH_REQUIRED',401);
   requireThat(/^[0-9a-f]{64}$/.test(stateHash),'INVALID_STATE_HASH',400);unb64u(challenge,32);
   callbackAllowed(this.callbacks,targetApp,callback,'callbacks');callbackAllowed(this.callbacks,targetApp,returnTo,'returns');
   if(expected!==null)exactSelector(expected,targetApp);
   if(purpose==='unlock')requireThat(expected,'UNLOCK_CONTEXT_REQUIRED',400);
-  const record={tx,purpose,targetApp,expected,stateHash,challenge,callback,returnTo,createdAt:now,expiresAt:now+300};
+  // Academy must not extend the deadline already fixed by the child's transaction.
+  requireThat(expiresAt===undefined||safeInt(expiresAt),'INVALID_CEREMONY_EXPIRY',400);
+  const deadline=expiresAt===undefined?now+300:Math.min(expiresAt,now+300);
+  requireThat(deadline>now,'CEREMONY_EXPIRED',409);
   const old=await this.store.first('SELECT * FROM jwt_v2_ceremonies WHERE tx=?',tx);
   if(old){
-   requireThat(old.purpose===purpose&&old.target_app===targetApp&&old.expected_json===(expected===null?null:canonical(expected))&&old.state_hash===stateHash&&old.challenge===challenge&&old.callback===callback&&old.return_to===returnTo,'CEREMONY_CONFLICT',409);
+   requireThat(old.purpose===purpose&&old.target_app===targetApp&&old.expected_json===(expected===null?null:canonical(expected))&&old.state_hash===stateHash&&old.challenge===challenge&&old.callback===callback&&old.return_to===returnTo&&(expiresAt===undefined||old.expires_at===Math.min(expiresAt,old.created_at+300)),'CEREMONY_CONFLICT',409);
    return {tx,expiresAt:old.expires_at,status:old.status};
   }
-  await this.store.stmt('INSERT INTO jwt_v2_ceremonies(tx,purpose,target_app,expected_json,state_hash,challenge,callback,return_to,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?)',tx,purpose,targetApp,expected===null?null:canonical(expected),stateHash,challenge,callback,returnTo,now,now+300).run();
-  return {tx,expiresAt:now+300,status:'PENDING'};
+  await this.store.stmt('INSERT INTO jwt_v2_ceremonies(tx,purpose,target_app,expected_json,state_hash,challenge,callback,return_to,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?)',tx,purpose,targetApp,expected===null?null:canonical(expected),stateHash,challenge,callback,returnTo,now,deadline).run();
+  return {tx,expiresAt:deadline,status:'PENDING'};
  }
  async bindParent({request,tx,sub,pinRequired}){
   await this.pinRequest(request,tx);const now=this.clock(),ceremony=await this.store.first('SELECT * FROM jwt_v2_ceremonies WHERE tx=?',tx);
