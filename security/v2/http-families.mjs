@@ -8,7 +8,10 @@ export function initialBinding(runtime,{sub,ce,ae,le=0,psid,sid=psid,bsid,bv,s_i
  return {ver:2,env:runtime.config.env,iss:runtime.config.origin,aud:'urn:uaa:'+runtime.config.env+':'+runtime.app+':api:v2',sub,sid,psid,bsid,bv,ce,ae,le,sv,ue,pv:capture.pv,vat:capture.vat,s_iat,s_exp};
 }
 export async function rotateFamily(runtime,request,body){
- const current=await runtime.currentFamily(request,{allowSpent:true}),f=await runtime.observeState(current.family);
+ const current=await runtime.currentFamily(request,{allowSpent:true});
+ requireThat(current.family,'SESSION_ENDED',401);
+ const f=await runtime.observeState(current.family);
+ requireThat(!['REVOKED','EXPIRED'].includes(f.state),'SESSION_ENDED',401);
  const expected=body.expectedContext;requireThat(expected,'EXPECTED_CONTEXT_REQUIRED',409);
  const original=current.historical?JSON.parse(current.history.binding_json):JSON.parse(f.binding_json);
  requireExpected(selector(original,runtime.app),expected);
@@ -20,24 +23,26 @@ export async function rotateFamily(runtime,request,body){
  }
  requireThat(f.state==='UNLOCKED','PIN_REQUIRED',423);
  requireThat(typeof body.qualifyingActivity==='boolean','ACTIVITY_CLASSIFICATION_REQUIRED',400);
+ const sharedChildGuard=runtime.settings.raw.sharedChildEntry?await (await import('./shared-entry.mjs')).requireSharedChildRenewal(runtime,f):null;
  const capture=await runtime.nativeCapture(original),next={...original,sv:original.sv+1,pv:capture.pv,vat:capture.vat};
  const now=runtime.clock(),idleUntil=Math.min(f.s_exp,(body.qualifyingActivity?now:f.last_refresh)+f.policy_minutes*60);
  const projection=await runtime.buildProjection(next,capture,{previous:JSON.parse(f.projection_json)});
  const deadline=Math.min(capture.vat+900,idleUntil,f.s_exp,projection.timedUntil),refresh=opaque();
- const result=await runtime.store.rotate({sid:f.sid,fingerprint:current.fingerprint,intentId:body.operationId,csrfHash:auth.csrfHash,expectedBinding:original,successorFingerprint:await fingerprint(refresh,runtime.config),nextBinding:next,nextProjection:projection,now,idleUntil,deadline,vectorGuards:capture.vectorGuards,qualifyingActivity:body.qualifyingActivity,capture,requireBarrier:runtime.app!=='academy'});
+ const result=await runtime.store.rotate({sid:f.sid,fingerprint:current.fingerprint,intentId:body.operationId,csrfHash:auth.csrfHash,expectedBinding:original,successorFingerprint:await fingerprint(refresh,runtime.config),nextBinding:next,nextProjection:projection,now,idleUntil,deadline,vectorGuards:capture.vectorGuards,qualifyingActivity:body.qualifyingActivity,capture,requireBarrier:runtime.app!=='academy',sharedChildGuard});
  requireThat(result.winner,'OPERATION_SUPERSEDED',409);
  const publication=await runtime.publishWinningFamily(f.sid);
  const family=await runtime.store.family(f.sid);
  return runtime.cookieResponse(family,refresh,{...await runtime.stateDTO(family),operationId:body.operationId,outcome:'COMMITTED',...publication});
 }
 
-export async function childTransition(runtime,{claims,purpose,installed,barrier,now,operationId}){
+export async function childTransition(runtime,{claims,purpose,installed,barrier,now,operationId,sharedAcademyAdmission=null}){
  const store=runtime.store,old=purpose==='unlock'?await store.family(claims.sid):null;
  const account=await store.first('SELECT * FROM jwt_v2_accounts WHERE sub=?',claims.sub);
  const le=old?.le??account?.le??0,sid=old?.sid||crypto.randomUUID();
  const skeleton={...claims,le,sid},capture=await runtime.nativeCapture(skeleton);
  const binding=initialBinding(runtime,{...claims,le,sid,sv:old?old.sv+1:1,ue:old?old.ue+1:0,capture});
- const projection=await runtime.buildProjection(binding,capture,{initialIssuance:false});
+ const projection=await runtime.buildProjection(binding,capture,{initialIssuance:false,previous:old?JSON.parse(old.projection_json):{}});
+ if(sharedAcademyAdmission)projection.sharedAcademyAdmission=sharedAcademyAdmission;
  const deadline=Math.min(binding.vat+900,barrier.idleUntil,claims.s_exp,projection.timedUntil),refresh=opaque(),fp=await fingerprint(refresh,runtime.config);
  const [ag,ac]=store.guard("SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM jwt_v2_accounts WHERE sub=? AND (ce>? OR (ce=? AND ae>?) OR active=0))",[claims.sub,claims.ce,claims.ce,claims.ae]);
  const [pg,pc]=store.guard("SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM jwt_v2_parents WHERE psid=? AND (sub<>? OR bsid<>? OR bv<>? OR ce<>? OR ae<>? OR s_iat<>? OR s_exp<>? OR state IN('REVOKED','EXPIRED')))",[claims.psid,claims.sub,claims.bsid,claims.bv,claims.ce,claims.ae,claims.s_iat,claims.s_exp]);

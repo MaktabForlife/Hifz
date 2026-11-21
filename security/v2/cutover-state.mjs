@@ -5,6 +5,18 @@ export function heldForV111Cutover(env) {
   return phase !== 'active' || env.UAA_V2_ENABLED !== '1';
 }
 
+// A request eligible to reach C19 still requires the fixed origin, signed body,
+// configured peer key and fresh nonce in handleServiceHTTP.
+export function offlineSecurityRequest(request, env, app) {
+  if (env.UAA_V111_CUTOVER !== 'held' || env.UAA_V2_ENABLED !== '1') return false;
+  if (request.method !== 'POST' || request.headers.has('Origin') || request.headers.has('Cookie')) return false;
+  if (!request.headers.has('X-UAA-Service-Key')) return false;
+  const url = new URL(request.url);
+  if (url.search) return false;
+  if (app === 'academy') return url.pathname === '/internal/auth/v2/reconcile';
+  return ['studio', 'hifz'].includes(app) && url.pathname === '/internal/auth/v2/events';
+}
+
 export function cutoverUnavailable() {
   return Response.json({
     success: false,

@@ -1,3 +1,5 @@
+import {withdrawalFields} from './key-withdrawal.mjs';
+import {sharedAccountSelector,sharedAccountBaselinePlan} from './shared-account-baselines.mjs';
 import {senderFloorSchemaSQL} from './sender-floors.mjs';
 import {bytes,canonical,strictJSON,exact,requireThat,ascii,safeInt,uuid,digest,unb64u,equal} from './codec.mjs';
 import {validateEvent,validateTarget,receiveBatch,BUCKETS} from './events.mjs';
@@ -23,7 +25,7 @@ function streamEntry(value){
  requireThat(value.sourceApp==='academy'&&child(value.targetApp)&&ascii(value.stream)&&ascii(value.ownerEpoch)&&typeof value.genesis==='boolean','INVALID_SERVICE_STREAM_REGISTRY',503);return value;
 }
 export function loadServiceRegistry(runtime){
- const raw=runtime.settings.raw;requireThat(raw.snapshotSchema===3,'SCOPED_SNAPSHOT_PROFILE_REQUIRED',503);requireThat(Array.isArray(raw.serviceStreams)&&raw.serviceStreams.length>0&&raw.serviceStreams.length<=128&&Array.isArray(raw.ownerBridges)&&raw.ownerBridges.length<=128&&Array.isArray(raw.serviceDependencies)&&raw.serviceDependencies.length<=256,'SERVICE_REGISTRY_REQUIRED',503);
+ const raw=runtime.settings.raw;requireThat([3,4].includes(raw.snapshotSchema),'SCOPED_SNAPSHOT_PROFILE_REQUIRED',503);requireThat(Array.isArray(raw.serviceStreams)&&raw.serviceStreams.length>0&&raw.serviceStreams.length<=128&&Array.isArray(raw.ownerBridges)&&raw.ownerBridges.length<=128&&Array.isArray(raw.serviceDependencies)&&raw.serviceDependencies.length<=256,'SERVICE_REGISTRY_REQUIRED',503);
  const streams=raw.serviceStreams.map(streamEntry),seen=new Set();
  for(const s of streams){const key=canonical([s.targetApp,s.stream,s.ownerEpoch]);requireThat(!seen.has(key),'DUPLICATE_SERVICE_STREAM',503);seen.add(key);}
  const bridges=raw.ownerBridges.map(value=>{exact(value,['sourceApp','targetApp','stream','ownerEpoch','predecessorEpoch','coveredThrough','receiptRef','denialsIncluded']);requireThat(value.sourceApp==='academy'&&child(value.targetApp)&&ascii(value.stream)&&ascii(value.ownerEpoch)&&ascii(value.predecessorEpoch)&&value.ownerEpoch!==value.predecessorEpoch&&safeInt(value.coveredThrough)&&ascii(value.receiptRef)&&value.denialsIncluded===true,'INVALID_OWNER_BRIDGE_REGISTRY',503);requireThat(streams.some(s=>s.targetApp===value.targetApp&&s.stream===value.stream&&s.ownerEpoch===value.ownerEpoch)&&streams.some(s=>s.targetApp===value.targetApp&&s.stream===value.stream&&s.ownerEpoch===value.predecessorEpoch),'OWNER_BRIDGE_STREAM_REQUIRED',503);return value;});
@@ -60,6 +62,7 @@ class RuntimeServices{
   return [g,this.store.stmt('INSERT INTO jwt_v2_policy_history VALUES(?,?,?,?,?,?)',target.ownerEpoch,target.revision,target.inactivityMinutes,canonical(target),await digest(target),now),this.store.stmt('UPDATE jwt_v2_policy_epochs SET highest_seen=max(highest_seen,?) WHERE owner_epoch=?',target.revision,target.ownerEpoch),c];
  }
  async effectPlan(workId,target,{sub=null}={}){
+  if(target.type==='key'&&target.purpose==='academy-shared-access')requireThat(child(this.runtime.app)&&this.runtime.settings.sharedAcademy,'SHARED_KEY_REGISTRY_REQUIRED',503);
   const now=this.runtime.clock(),requiredControlKeys=['policy','key'].includes(target.type)?[this.store.controlKey('control/app')]:[];
   const native=typeof this.runtime.native?.applySecurityFactPlan==='function'?await this.runtime.native.applySecurityFactPlan({target,scopeSub:sub}):[];requireThat(Array.isArray(native),'NATIVE_SECURITY_FACT_PLAN_REQUIRED',503);
    return [...native,...(target.type==='policy'?await this.policyPlan(target,now):[]),...await restrictionPlan(this.store,{workId,target,sub,now,requiredControlKeys})];
@@ -74,7 +77,11 @@ class RuntimeServices{
    for(const row of rows){budget.remaining--;let family=await this.store.family(row.sid);if(this.runtime.clock()>=family.s_exp){await markSessionCovered(this.store,{workId,sid:row.sid,now:this.runtime.clock()});continue;}
     if(target.type==='policy')await applyFamilyPolicy(this.store,{sid:row.sid,now:this.runtime.clock()});
     family=await this.store.family(row.sid);const saved=strictJSON(family.projection_json),next={...saved,enforcedTargets:compactFloors([...(saved.enforcedTargets||[]),target])};
-    if(target.type==='key'){next.handoffRegistryRevision=Math.max(saved.handoffRegistryRevision??0,target.registryRevision);next.withdrawnHandoffKids=[...new Set([...(saved.withdrawnHandoffKids||[]),target.kid])].sort();}
+    if(target.type==='key'){
+     const fields=withdrawalFields(target.purpose);
+     next[fields.revision]=Math.max(saved[fields.revision]??0,target.registryRevision);
+     next[fields.withdrawn]=[...new Set([...(saved[fields.withdrawn]||[]),target.kid])].sort();
+    }
     const [g,c]=this.store.guard('SELECT 1 FROM jwt_v2_families WHERE sid=? AND cr=? AND projection_json=?',[row.sid,family.cr,family.projection_json]);
     await this.store.batch([g,this.store.stmt('UPDATE jwt_v2_families SET projection_json=?,cr=cr+1 WHERE sid=?',canonical(next),row.sid),c]);
     const projection=await this.runtime.publishFamily(row.sid);await markSessionCovered(this.store,{workId,sid:row.sid,projection,controlKey:this.store.controlKey('security/session/'+row.sid),now:this.runtime.clock()});
@@ -107,10 +114,12 @@ class RuntimeServices{
   if(current.policyEpoch!==head.owner_epoch||current.policyRevision!==head.coherent_through||current.inactivityMinutes!==head.minutes){const next={...current,cr:current.cr+1,policyEpoch:head.owner_epoch,policyRevision:head.coherent_through,inactivityMinutes:head.minutes},plan=await sourceControlPlan(this.store,{suffix:'control/app',projection:next,expectedCR:current.cr,commitRef:'service-policy-'+head.owner_epoch+'-'+head.coherent_through});await this.store.batch(plan.statements);}
  }
  async finishKey(target,workId){
-  const current=await this.appPrimary(),revision=current.handoffRegistryRevision??current.keyRegistryRevision,withdrawn=current.withdrawnHandoffKids||[];
+  const current=await this.appPrimary(),fields=withdrawalFields(target.purpose);
+  const revision=current[fields.revision]??(target.purpose==='academy-handoff'?current.keyRegistryRevision:0);
+  const withdrawn=current[fields.withdrawn]||[];
   if(revision>=target.registryRevision&&withdrawn.includes(target.kid))return;
-  requireThat(target.purpose==='academy-handoff'&&target.registryRevision>revision,'HANDOFF_REGISTRY_CONFLICT',409);
-  const next={...current,cr:current.cr+1,handoffRegistryRevision:target.registryRevision,withdrawnHandoffKids:[...new Set([...withdrawn,target.kid])].sort()};
+  requireThat(target.registryRevision>revision,'KEY_REGISTRY_CONFLICT',409);
+  const next={...current,cr:current.cr+1,[fields.revision]:target.registryRevision,[fields.withdrawn]:[...new Set([...withdrawn,target.kid])].sort()};
   const registry=await registryControlPlan(this.store,{registry:next,receiptRef:'service-key-'+workId,predecessor:{epoch:current.keyRegistryEpoch,revision:current.keyRegistryRevision}});await this.store.batch(registry.statements);
   const plan=await sourceControlPlan(this.store,{suffix:'control/app',projection:next,expectedCR:current.cr,commitRef:'service-key-'+workId});await this.store.batch(plan.statements);
  }
@@ -173,7 +182,7 @@ class RuntimeServices{
  streamMap(targetApp){const result=new Map();for(const s of this.registry.streams.filter(s=>s.targetApp===targetApp)){if(!result.has(s.stream))result.set(s.stream,new Set());result.get(s.stream).add(s.ownerEpoch);}return result;}
  async reconcileOwner(request,peer){
   requireThat(this.runtime.app==='academy'&&peer.sourceApp===request.recipientApp,'RECONCILE_DIRECTION_CONFLICT',403);
-  const config={env:this.runtime.config.env,recipientApp:peer.sourceApp,snapshotSchema:3};validateReconcileRequest(request,config);
+  const config={env:this.runtime.config.env,recipientApp:peer.sourceApp,snapshotSchema:this.runtime.settings.raw.snapshotSchema};validateReconcileRequest(request,config);
   const existing=await this.store.first('SELECT * FROM jwt_v2_replay_captures WHERE request_id=?',request.requestId);
   const streams=this.streamMap(peer.sourceApp);
   if(existing){requireThat(existing.request_binding===requestBinding(request),'RECONCILE_REQUEST_CONFLICT',409);await verifyEventReplay({raw:existing.reply_json,request,config,streams,dependencies:this.registry.dependencies});return existing.reply_json;}
@@ -216,14 +225,20 @@ class RuntimeServices{
     for(const row of page){const event=strictJSON(row.event_json);await validateEvent(event,{env:config.env,targetApp:peer.sourceApp,streams,dependencies:this.registry.dependencies});if(event.target.type==='dependency'){const rule=this.registry.dependencies.get(event.target.id);requireThat(rule.scope==='GLOBAL'?event.sub===null:typeof event.sub==='string','SOURCE_DEPENDENCY_SCOPE_CONFLICT',503);}lastEpoch=row.owner_epoch;lastSequence=row.sequence;checked++;}
    }
   const selectors=Object.entries(bucketFor).map(([type,bucket])=>({bucket,sql:"SELECT DISTINCT "+(type==='dependency'?"json_set(json_extract(event_json,'$.target'),'$.sub',json_extract(event_json,'$.sub'))":"json_extract(event_json,'$.target')")+" record_json FROM jwt_v2_sender_history WHERE "+clauses+" AND json_extract(event_json,'$.target.type')=?",args:[peer.sourceApp,request.stream,...historyArgs,type]}));
-  const now=this.runtime.clock(),base={schema:3,env:this.runtime.config.env,requestId:request.requestId,ownerApp:'academy',recipientApp:peer.sourceApp,stream:request.stream,ownerEpoch:ledger.owner_epoch,coveredThrough,predecessorEpoch:bridge?.predecessorEpoch??null,predecessorCoveredThrough:bridge?.coveredThrough??null,snapshotId:crypto.randomUUID(),createdAt:now,expiresAt:now+600};
+  if(config.snapshotSchema===4&&request.stream==='account-security'){
+   const baseline=sharedAccountSelector(peer.sourceApp);
+   guard.sql+=' AND (SELECT count(*) FROM ('+baseline.sql+'))<=?';
+   guard.args.push(...baseline.args,10000);
+   selectors.push(baseline);
+  }
+  const now=this.runtime.clock(),base={schema:config.snapshotSchema,env:this.runtime.config.env,requestId:request.requestId,ownerApp:'academy',recipientApp:peer.sourceApp,stream:request.stream,ownerEpoch:ledger.owner_epoch,coveredThrough,predecessorEpoch:bridge?.predecessorEpoch??null,predecessorCoveredThrough:bridge?.coveredThrough??null,snapshotId:crypto.randomUUID(),createdAt:now,expiresAt:now+600};
   const id=await this.snap.capturePrimary({request,base,cursorKeyId:keys.currentKid,selectors,guard,config,now});
   await buildSnapshot({store:this.snap,snapshotId:id,cursorKey:keys.keys.get(keys.currentKid),cursorKeyId:keys.currentKid,config,recordConfig:{dependencies:this.registry.dependencies,recognisedEpochs:new Set(epochs.map(e=>e.epoch))},now,clock:this.runtime.clock,digestStreamFactory:this.runtime.digestStreamFactory});
   return serveSnapshotPage({store:this.snap,request,config,cursorKey:keys.keys.get(keys.currentKid),cursorKeyId:keys.currentKid,now:this.runtime.clock()});
  }
 
  receiver(request){
-  const config={env:this.runtime.config.env,recipientApp:this.runtime.app,snapshotSchema:3};validateReconcileRequest(request,config);
+  const config={env:this.runtime.config.env,recipientApp:this.runtime.app,snapshotSchema:this.runtime.settings.raw.snapshotSchema};validateReconcileRequest(request,config);
   requireThat(child(this.runtime.app)&&request.recipientApp===this.runtime.app,'RECONCILE_DIRECTION_CONFLICT',403);
   const entries=this.registry.streams.filter(s=>s.targetApp===this.runtime.app&&s.stream===request.stream),genesis=entries.filter(s=>s.genesis);
   requireThat(genesis.length===1&&(request.ownerEpoch===null||entries.some(s=>s.ownerEpoch===request.ownerEpoch)),'RECONCILE_EPOCH_NOT_CONFIGURED',409);
@@ -237,7 +252,10 @@ class RuntimeServices{
   const epoch=request.ownerEpoch??receiver.trust.genesisEpoch,local=await this.ledger(this.runtime.app,request.stream,epoch);
   requireThat(request.contiguousThrough===local.contiguous_through,'RECONCILE_LOCAL_CURSOR_CHANGED',409);
   if(request.ownerEpoch===null){const prior=await this.store.first("SELECT 1 FROM jwt_v2_receive_requests WHERE json_extract(request_json,'$.stream')=? LIMIT 1",request.stream);requireThat(!prior&&local.contiguous_through===0,'GENESIS_ALREADY_REQUESTED',409);}
-  else requireThat(local.highest_seen>local.contiguous_through&&request.missingRanges.every(([first])=>first>request.contiguousThrough),'RECONCILE_EVIDENCE_REQUIRED',409);
+  else{
+   const baselineRequest=receiver.config.snapshotSchema===4&&request.stream==='account-security'&&request.missingRanges.length===0;
+   requireThat(baselineRequest||local.highest_seen>local.contiguous_through&&request.missingRanges.every(([first])=>first>request.contiguousThrough),'RECONCILE_EVIDENCE_REQUIRED',409);
+  }
   requireThat(request.missingRanges.every(([,last])=>last<=local.highest_seen),'RECONCILE_RANGE_NOT_OBSERVED',409);
   await receiver.registerRequest(initial);return receiver;
  }
@@ -255,7 +273,12 @@ class RuntimeServices{
   }
   requireThat(reply.mode==='SNAPSHOT','UNKNOWN_RECONCILE_MODE',409);await receiver.stage(raw,{now:this.runtime.clock()});
   const verified=await receiver.verify(reply.snapshotId,{now:this.runtime.clock()});if(!verified.complete)return {mode:'SNAPSHOT',status:'STAGED',complete:false};
-  await receiver.applyRecords(reply.snapshotId,{now:this.runtime.clock(),planEffect:async({record,snapshotId,offset})=>{const scoped=snapshotEffect(record);return {workId:snapshotId+':'+offset,statements:await this.effectPlan(snapshotId+':'+offset,scoped.target,{sub:scoped.scopeSub})};}});
+  await receiver.applyRecords(reply.snapshotId,{now:this.runtime.clock(),planEffect:async({record,snapshotId,offset,metadata})=>{
+   const workId=snapshotId+':'+offset;
+   if(record.type==='accountBaseline')return sharedAccountBaselinePlan(this.store,{record,metadata,workId,now:this.runtime.clock()});
+   const scoped=snapshotEffect(record);
+   return {workId,statements:await this.effectPlan(workId,scoped.target,{sub:scoped.scopeSub})};
+  }});
   const effects=await this.store.all('SELECT work_id FROM jwt_v2_snapshot_effects WHERE snapshot_id=? ORDER BY record_offset',reply.snapshotId),budget={remaining:20};
   for(const effect of effects){try{await this.publishWork(effect.work_id,{budget});}catch{/* Denials remain durable; incomplete publication never becomes APPLIED. */}}
   return receiver.finishApplied(reply.snapshotId,{now:this.runtime.clock()});

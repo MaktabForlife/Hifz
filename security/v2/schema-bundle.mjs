@@ -10,5 +10,7 @@ import {controlPublicationSchemaSQL} from './control-publication.mjs';
 import {runtimeServiceSchemaSQL} from './runtime-service.mjs';
 import {httpSchemaSQL} from './http-context.mjs';
 import {draftCapsuleSchemaSQL} from './http-drafts.mjs';
-export const schemaRecipes=Object.freeze({owning:schemaSQL,ceremonies:ceremonySchemaSQL,reconciliation:snapshotSchemaSQL,policy:policySchemaSQL,recovery:recoverySchemaSQL,outbox:outboxSchemaSQL,issuanceFloors:issuanceFloorSchemaSQL,controlPublications:controlPublicationSchemaSQL,http:httpSchemaSQL,draftCapsules:draftCapsuleSchemaSQL,services:runtimeServiceSchemaSQL,nativePrerequisites:nativeSchemaSQL});
+import {sharedEntrySchemaSQL} from './shared-account-baselines.mjs';
+import {updateBoundarySchemaSQL,updateBoundaryGuardsSQL} from './update-boundary.mjs';
+export const schemaRecipes=Object.freeze({owning:schemaSQL,updateBoundary:updateBoundarySchemaSQL,sharedEntry:sharedEntrySchemaSQL,ceremonies:ceremonySchemaSQL,reconciliation:snapshotSchemaSQL,policy:policySchemaSQL,recovery:recoverySchemaSQL,outbox:outboxSchemaSQL,issuanceFloors:issuanceFloorSchemaSQL,controlPublications:controlPublicationSchemaSQL,http:httpSchemaSQL,updateBoundaryGuards:updateBoundaryGuardsSQL,draftCapsules:draftCapsuleSchemaSQL,services:runtimeServiceSchemaSQL,nativePrerequisites:nativeSchemaSQL});
 export const additiveSchemaSQL=Object.values(schemaRecipes).join('\n');

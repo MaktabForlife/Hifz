@@ -1,3 +1,4 @@
+import {requireFamilyUpdateGeneration} from './update-boundary.mjs';
 import {canonical,strictJSON,requireThat,digest,fingerprint,safeInt} from './codec.mjs';
 import {verifyToken} from './tokens.mjs';
 import {assertCommittedControl} from './control-publication.mjs';
@@ -11,7 +12,7 @@ async function sessionWitness(runtime,f,{winner=false,requirePending=!winner}={}
   }else if(error.code!=='SECURITY_TRANSPORT_UNAVAILABLE')throw error;}
  return life;}
 async function primary(runtime,{sid,kid,token=null,refresh=null,winner=false,action='read',resourceKeys=[]}){
- let family=await runtime.store.family(sid);requireThat(family,'SESSION_ENDED',401);const initialCR=family.cr,binding=strictJSON(family.binding_json),projection=strictJSON(family.projection_json),now=runtime.clock();const app=await appWitness(runtime);await sessionWitness(runtime,family,{winner});
+ let family=await runtime.store.family(sid);requireThat(family&&!['REVOKED','EXPIRED'].includes(family.state),'SESSION_ENDED',401);requireFamilyUpdateGeneration(runtime,family);const initialCR=family.cr,binding=strictJSON(family.binding_json),projection=strictJSON(family.projection_json),now=runtime.clock();const app=await appWitness(runtime);await sessionWitness(runtime,family,{winner});
  if(refresh!==null)requireThat(await fingerprint(refresh,runtime.config)===family.fingerprint,'WINNING_REFRESH_CHANGED',409);
  requireThat(now<family.s_exp&&family.s_exp===binding.s_exp&&binding.s_exp===binding.s_iat+604800,'SESSION_ENDED',401);requireThat(!app.withdrawnKids.includes(kid),'CURRENT_SIGNING_KEY_WITHDRAWN',503);
  if(family.state==='ADMITTED_LOCKED'&&winner){const g=runtime.store.guard("SELECT 1 FROM jwt_v2_families f JOIN jwt_v2_accounts a ON a.sub=f.sub JOIN jwt_v2_parents p ON p.psid=f.psid JOIN jwt_v2_browsers b ON b.bsid=f.bsid WHERE f.sid=? AND f.binding_json=? AND f.fingerprint=? AND f.state='ADMITTED_LOCKED' AND f.s_exp>unixepoch() AND a.active=1 AND a.ce=f.ce AND a.ae=f.ae AND a.le=f.le AND p.sub=f.sub AND p.ce=f.ce AND p.ae=f.ae AND p.bsid=f.bsid AND p.bv=f.bv AND p.s_iat=f.s_iat AND p.s_exp=f.s_exp AND p.state IN('UNLOCKED','LOCKED') AND b.sub=f.sub AND b.psid=f.psid AND b.bv=f.bv AND b.cancelled_through<f.bv",[sid,family.binding_json,family.fingerprint]);await runtime.store.batch(g);return {family,app,binding,rights:null,deadline:family.s_exp};}

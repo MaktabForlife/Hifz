@@ -1,14 +1,17 @@
 import {bytes,strictJSON,canonical,exact,requireThat,reject,safeInt,ascii,uuid,domainDigest,digest,hmac,b64u,unb64u,equal,hex} from './codec.mjs';
 import {BUCKETS,validateEvent} from './events.mjs';
+import {sharedBaselineHeadPlan} from './shared-account-baselines.mjs';
 const META='schema env requestId ownerApp recipientApp stream ownerEpoch coveredThrough predecessorEpoch predecessorCoveredThrough snapshotId createdAt expiresAt totalRecords bucketCounts pageCount'.split(' ');
 const BASE=META.filter(k=>!['totalRecords','bucketCounts','pageCount'].includes(k));
 const PAGE=[...META,...'mode snapshotDigest pageIndex recordOffset entries previousPageDigest pageDigest nextPageToken'.split(' ')];
 const REQUEST='schema env sourceApp targetApp requestId ownerApp recipientApp stream ownerEpoch contiguousThrough missingRanges knownFloorsDigest pageToken'.split(' ');
-const TYPES={accountCutoffs:'accountCutoff',credentialFloors:'credentialEpoch',parentCutoffs:'parent',browserCutoffs:'browser',keyWithdrawals:'key',policies:'policy',dependencyFloors:'dependency'};
-const FIELDS={accountCutoff:'type sub maxCe maxAe reason incidentId',credentialEpoch:'type sub newCe reason',parent:'type sub psid bsid bv ce ae',browser:'type bsid maxBv',key:'type purpose kid registryRevision',policy:'type policyId ownerEpoch revision inactivityMinutes',dependency:'type id ownerEpoch revision effect deniedActions'};
+const TYPES={accountBaselines:'accountBaseline',accountCutoffs:'accountCutoff',credentialFloors:'credentialEpoch',parentCutoffs:'parent',browserCutoffs:'browser',keyWithdrawals:'key',policies:'policy',dependencyFloors:'dependency'};
+const FIELDS={accountBaseline:'type sub ce ae',accountCutoff:'type sub maxCe maxAe reason incidentId',credentialEpoch:'type sub newCe reason',parent:'type sub psid bsid bv ce ae',browser:'type bsid maxBv',key:'type purpose kid registryRevision',policy:'type policyId ownerEpoch revision inactivityMinutes',dependency:'type id ownerEpoch revision effect deniedActions'};
 const HEX=/^[0-9a-f]{64}$/;
 const q=()=>crypto.randomUUID();
-export function snapshotContract(config){const version=config?.snapshotSchema??2;requireThat(version===2||version===3,'UNSUPPORTED_SNAPSHOT_SCHEMA',409);return version;}
+export function snapshotContract(config){const version=config?.snapshotSchema??2;requireThat(version===2||version===3||version===4,'UNSUPPORTED_SNAPSHOT_SCHEMA',409);return version;}
+const baselineBuckets=Object.freeze([...BUCKETS,'accountBaselines']);
+const snapshotBuckets=schema=>schema===4?baselineBuckets:BUCKETS;
 export const snapshotDomain=(metadata,kind)=>'uaa-'+kind+'-v'+(metadata.schema??2);
 export function snapshotEffect(record){if(record.type==='dependency'&&Object.hasOwn(record,'sub')){const {sub,...target}=record;return {target,scopeSub:sub};}return {target:record,scopeSub:record.sub??null};}
 const pick=(x,keys)=>Object.fromEntries(keys.map(k=>[k,x[k]]));
@@ -68,26 +71,27 @@ export function validateEpoch(meta,trust){
 }
 function validateMetadata(meta,config,now){
  exact(meta,META);validateBase(pick(meta,BASE),config,now);
- exact(meta.bucketCounts,BUCKETS);
- requireThat(safeInt(meta.totalRecords)&&safeInt(meta.pageCount,1)&&BUCKETS.every(b=>safeInt(meta.bucketCounts[b]))&&BUCKETS.reduce((n,b)=>n+meta.bucketCounts[b],0)===meta.totalRecords,'SNAPSHOT_COUNT_CONFLICT',409);
+ const buckets=snapshotBuckets(meta.schema);
+ exact(meta.bucketCounts,buckets);
+ requireThat(safeInt(meta.totalRecords)&&safeInt(meta.pageCount,1)&&buckets.every(b=>safeInt(meta.bucketCounts[b]))&&buckets.reduce((n,b)=>n+meta.bucketCounts[b],0)===meta.totalRecords,'SNAPSHOT_COUNT_CONFLICT',409);
  requireThat(meta.bucketCounts.localCutoffs===0&&meta.pageCount<=Math.max(1,meta.totalRecords),'INVALID_REMOTE_SNAPSHOT',409);
 }
 export function validateRecord(bucket,record,{ownerEpoch,recipientApp,dependencies=new Map(),recognisedEpochs=new Set([ownerEpoch]),snapshotSchema=2}){
- requireThat(BUCKETS.includes(bucket)&&bucket!=='localCutoffs'&&record?.type===TYPES[bucket],'INVALID_SNAPSHOT_BUCKET',409);
- exact(record,(FIELDS[record.type]+(record.type==='dependency'&&snapshotSchema===3?' sub':'')).split(' '));
+ requireThat(snapshotBuckets(snapshotSchema).includes(bucket)&&bucket!=='localCutoffs'&&record?.type===TYPES[bucket],'INVALID_SNAPSHOT_BUCKET',409);
+ exact(record,(FIELDS[record.type]+(record.type==='dependency'&&snapshotSchema>=3?' sub':'')).split(' '));
  canonical(record);
  for(const field of ['maxCe','maxAe','newCe','bv','ce','ae','maxBv','registryRevision','revision'])if(Object.hasOwn(record,field))requireThat(safeInt(record[field],1),'INVALID_SNAPSHOT_COUNTER',409);
  for(const field of ['psid','bsid'])if(Object.hasOwn(record,field))requireThat(uuid(record[field]),'INVALID_SNAPSHOT_UUID',409);
- if(Object.hasOwn(record,'sub'))requireThat(record.type==='dependency'&&snapshotSchema===3&&record.sub===null||subject(record.sub),'INVALID_SNAPSHOT_SUBJECT',409);
+ if(Object.hasOwn(record,'sub'))requireThat(record.type==='dependency'&&snapshotSchema>=3&&record.sub===null||subject(record.sub),'INVALID_SNAPSHOT_SUBJECT',409);
  switch(record.type){
-  case 'accountCutoff':requireThat(['VOLUNTARY_LOGOUT','VERIFIED_REFRESH_REUSE','SUSPICIOUS_ACTIVITY','CONFIRMED_KEY_COMPROMISE','ACCOUNT_DISABLED'].includes(record.reason)&&(record.incidentId===null||uuid(record.incidentId)),'INVALID_SNAPSHOT_CUTOFF',409);break;
+  case 'accountCutoff':requireThat(['VOLUNTARY_LOGOUT','VERIFIED_REFRESH_REUSE','SUSPICIOUS_ACTIVITY','CONFIRMED_KEY_COMPROMISE','ACCOUNT_DISABLED','OFFLINE_UPDATE'].includes(record.reason)&&(record.incidentId===null||uuid(record.incidentId)),'INVALID_SNAPSHOT_CUTOFF',409);break;
   case 'credentialEpoch':requireThat(['ADMIN_PIN_RESET','PASSWORD_RESET'].includes(record.reason),'INVALID_SNAPSHOT_CREDENTIAL_REASON',409);break;
-  case 'key':requireThat(record.purpose==='academy-handoff'&&/^[A-Za-z0-9._-]{1,64}$/.test(record.kid),'INVALID_SNAPSHOT_KEY',409);break;
+  case 'key':requireThat(['academy-handoff','academy-shared-access'].includes(record.purpose)&&/^[A-Za-z0-9._-]{1,64}$/.test(record.kid),'INVALID_SNAPSHOT_KEY',409);break;
   case 'policy':requireThat(record.policyId==='session-inactivity'&&recognisedEpochs.has(record.ownerEpoch)&&safeInt(record.inactivityMinutes,15)&&record.inactivityMinutes<=200,'INVALID_SNAPSHOT_POLICY',409);break;
   case 'dependency':{
    const rule=dependencies.get(record.id);
    requireThat(rule&&rule.ownerApp==='academy'&&rule.recipients.includes(recipientApp)&&(record.ownerEpoch===rule.epoch||rule.epochs?.has(record.ownerEpoch))&&safeInt(record.revision,1),'SNAPSHOT_DEPENDENCY_OWNER_CONFLICT',409);
-    if(snapshotSchema===3)requireThat(['ACCOUNT','GLOBAL'].includes(rule.scope)&&(rule.scope==='GLOBAL'?record.sub===null:subject(record.sub)),'SNAPSHOT_DEPENDENCY_SCOPE_CONFLICT',409);
+    if(snapshotSchema>=3)requireThat(['ACCOUNT','GLOBAL'].includes(rule.scope)&&(rule.scope==='GLOBAL'?record.sub===null:subject(record.sub)),'SNAPSHOT_DEPENDENCY_SCOPE_CONFLICT',409);
     else requireThat(rule.scope==='GLOBAL','AMBIGUOUS_LEGACY_DEPENDENCY_SCOPE',409);
    requireThat(['INVALIDATE','DENY'].includes(record.effect)&&Array.isArray(record.deniedActions)&&new Set(record.deniedActions).size===record.deniedActions.length,'INVALID_SNAPSHOT_ACTIONS',409);
    requireThat(record.deniedActions.every((v,i)=>ascii(v)&&rule.actions.includes(v)&&(i===0||record.deniedActions[i-1]<v)),'INVALID_SNAPSHOT_ACTIONS',409);
@@ -98,6 +102,7 @@ export function validateRecord(bucket,record,{ownerEpoch,recipientApp,dependenci
 }
 function semanticKey(record){
  switch(record.type){
+  case 'accountBaseline':return canonical([record.sub]);
   case 'accountCutoff':return canonical([record.sub,record.maxCe,record.maxAe]);
   case 'credentialEpoch':return canonical([record.sub,record.newCe]);
   case 'parent':return canonical([record.sub,record.psid,record.bsid,record.bv,record.ce,record.ae]);
@@ -110,14 +115,14 @@ function semanticKey(record){
 export function compareUtf8(a,b){
  const x=bytes(a),y=bytes(b);for(let i=0;i<Math.min(x.length,y.length);i++)if(x[i]!==y[i])return x[i]<y[i]?-1:1;return Math.sign(x.length-y.length);
 }
-const bucketIndex=b=>BUCKETS.indexOf(b);
+const bucketIndex=b=>baselineBuckets.indexOf(b);
 const ordered=(previous,current)=>!previous||bucketIndex(previous.bucket)<bucketIndex(current.bucket)||previous.bucket===current.bucket&&compareUtf8(previous.json,current.json)<0;
 function defaultDigestStream(){requireThat(typeof crypto.DigestStream==='function','STREAMING_DIGEST_UNAVAILABLE',503);return new crypto.DigestStream('SHA-256');}
 export async function streamingSnapshotDigest(metadata,recordsForBucket,{digestStreamFactory=defaultDigestStream}={}){
  const stream=digestStreamFactory(),writer=stream.getWriter();
  const write=s=>writer.write(bytes(s));
   await write(snapshotDomain(metadata,'security-snapshot')+'\0{"metadata":'+canonical(metadata)+',"state":{');
- const keys=[...BUCKETS,'schema'].sort();
+ const keys=[...snapshotBuckets(metadata.schema),'schema'].sort();
  for(let k=0;k<keys.length;k++){
   const name=keys[k];if(k)await write(',');await write(canonical(name)+':');
    if(name==='schema'){await write(String(metadata.schema??2));continue;}
@@ -149,7 +154,7 @@ export class SnapshotStore {
   // The guard must fence the exact owning stream epoch/watermark and split phase.
   requireThat(guard&&typeof guard.sql==='string'&&Array.isArray(guard.args)&&Array.isArray(selectors),'OWNING_CAPTURE_GUARD_REQUIRED',503);
   const [g,clear]=this.guard(guard.sql,guard.args);
-  const parts=selectors.map(s=>{requireThat(BUCKETS.includes(s.bucket)&&s.bucket!=='localCutoffs'&&typeof s.sql==='string'&&Array.isArray(s.args),'INVALID_CAPTURE_SELECTOR',503);return this.stmt('INSERT INTO jwt_v2_reconcile_records(snapshot_id,bucket,raw_json) SELECT ?,?,record_json FROM ('+s.sql+')',base.snapshotId,s.bucket,...s.args);});
+  const parts=selectors.map(s=>{requireThat(snapshotBuckets(base.schema).includes(s.bucket)&&s.bucket!=='localCutoffs'&&typeof s.sql==='string'&&Array.isArray(s.args),'INVALID_CAPTURE_SELECTOR',503);return this.stmt('INSERT INTO jwt_v2_reconcile_records(snapshot_id,bucket,raw_json) SELECT ?,?,record_json FROM ('+s.sql+')',base.snapshotId,s.bucket,...s.args);});
   try{await this.batch([g,this.stmt("INSERT INTO jwt_v2_reconcile_captures(snapshot_id,request_id,request_binding,base_json,cursor_key_id,status) VALUES(?,?,?,?,?,'CAPTURING')",base.snapshotId,request.requestId,requestBinding(request),canonical(base),cursorKeyId),...parts,this.stmt("UPDATE jwt_v2_reconcile_captures SET status='CAPTURED' WHERE snapshot_id=?",base.snapshotId),clear]);}
   catch(error){const raced=await this.first('SELECT * FROM jwt_v2_reconcile_captures WHERE request_id=?',request.requestId);if(!raced)throw error;requireThat(raced.request_binding===requestBinding(request),'RECONCILE_REQUEST_CONFLICT',409);requireThat(now<strictJSON(raced.base_json).expiresAt,'SNAPSHOT_EXPIRED_OR_INVALID',409);return raced.snapshot_id;}
   return base.snapshotId;
@@ -163,8 +168,8 @@ export class SnapshotStore {
    for(;;){const rows=await this.all('SELECT canonical_json FROM jwt_v2_reconcile_records WHERE snapshot_id=? AND bucket=? AND canonical_json IS NOT NULL AND (? IS NULL OR CAST(canonical_json AS BLOB)>CAST(? AS BLOB)) ORDER BY CAST(canonical_json AS BLOB) LIMIT 20',snapshotId,bucket,previous,previous);if(!rows.length)return;for(const r of rows){previous=r.canonical_json;yield r.canonical_json;}}
   }
  }
- async *orderedRecords(snapshotId){
-  for(const bucket of BUCKETS)for await(const json of this.recordRows(snapshotId,bucket))yield {bucket,record:strictJSON(json),json};
+ async *orderedRecords(snapshotId,schema){
+  for(const bucket of snapshotBuckets(schema))for await(const json of this.recordRows(snapshotId,bucket))yield {bucket,record:strictJSON(json),json};
  }
 }
 
@@ -187,7 +192,7 @@ export async function buildSnapshot({store,snapshotId,cursorKey,cursorKeyId,conf
    catch(error){reject('DUPLICATE_OR_CONFLICTING_SNAPSHOT_FACT',409);}
   }
  }
- const counts=Object.fromEntries(BUCKETS.map(b=>[b,0]));let entries=[],offset=0,pageIndex=0;
+ const counts=Object.fromEntries(snapshotBuckets(base.schema).map(b=>[b,0]));let entries=[],offset=0,pageIndex=0;
  async function flush(){
   const part={entries,offset,index:pageIndex},json=canonical(entries);
   const prior=await store.first('SELECT * FROM jwt_v2_reconcile_parts WHERE snapshot_id=? AND page_index=?',snapshotId,pageIndex);
@@ -196,7 +201,7 @@ export async function buildSnapshot({store,snapshotId,cursorKey,cursorKeyId,conf
   const stored=await store.first('SELECT * FROM jwt_v2_reconcile_parts WHERE snapshot_id=? AND page_index=?',snapshotId,pageIndex);requireThat(stored.entries_json===json&&stored.record_offset===offset,'SNAPSHOT_PART_CONFLICT',409);
   offset+=entries.length;pageIndex++;entries=[];return part;
  }
- for await(const entry of store.orderedRecords(snapshotId)){
+ for await(const entry of store.orderedRecords(snapshotId,base.schema)){
   const wire={bucket:entry.bucket,record:entry.record};
   if(entries.length&&(entries.length===20||bytes(canonical([...entries,wire])).length>61440))await flush();
   entries.push(wire);counts[entry.bucket]++;requireThat(safeInt(counts[entry.bucket]),'SNAPSHOT_COUNT_OVERFLOW',503);
@@ -308,7 +313,7 @@ export class SnapshotReceiver {
   if(count.n<meta.pageCount)return {status:'STAGED',complete:false,snapshotId};
   requireThat(count.n===meta.pageCount,'EXTRA_SNAPSHOT_PAGE',409);
   let previousDigest=await domainDigest(snapshotDomain(meta,'snapshot-start'),{metadata:meta,snapshotDigest:capture.snapshot_digest}),offset=0,previousRecord=null,previousEntries=null;
-  const counts=Object.fromEntries(BUCKETS.map(b=>[b,0]));
+  const counts=Object.fromEntries(snapshotBuckets(meta.schema).map(b=>[b,0]));
   for(let index=0;index<meta.pageCount;index++){
    const row=await this.store.first('SELECT page_json FROM jwt_v2_receive_pages WHERE snapshot_id=? AND page_index=?',snapshotId,index);requireThat(row,'SNAPSHOT_PAGE_GAP',409);
    const {page}=validatePage(row.page_json,{config:this.config,recordConfig:this.recordConfig,trust:this.trust,now});
@@ -345,7 +350,7 @@ export class SnapshotReceiver {
    for(const row of rows){
     offset=row.record_offset;const old=await this.store.first('SELECT e.*,w.target_json,w.scope_sub FROM jwt_v2_snapshot_effects e JOIN jwt_v2_worksets w ON w.work_id=e.work_id WHERE e.snapshot_id=? AND e.record_offset=?',snapshotId,offset);if(old){const scoped=snapshotEffect(strictJSON(row.record_json));requireThat(old.record_digest===row.record_digest&&old.target_json===canonical(scoped.target)&&(old.scope_sub??null)===scoped.scopeSub,'SNAPSHOT_APPLICATION_CONFLICT',409);continue;}
     validateMetadata(metadata,this.config,Math.max(now,this.clock()));
-    const effect=await planEffect({bucket:row.bucket,record:strictJSON(row.record_json),recordDigest:row.record_digest,snapshotId,offset});
+    const effect=await planEffect({bucket:row.bucket,record:strictJSON(row.record_json),recordDigest:row.record_digest,snapshotId,offset,metadata});
     requireThat(ascii(effect.workId,256)&&Array.isArray(effect.statements),'SNAPSHOT_EFFECT_PLAN_REQUIRED',503);
     validateMetadata(metadata,this.config,Math.max(now,this.clock()));
     const [g,clear]=this.store.guard("SELECT 1 FROM jwt_v2_receive_snapshots WHERE snapshot_id=? AND status IN('VERIFIED','APPLIED')",[snapshotId]);
@@ -367,7 +372,7 @@ export class SnapshotReceiver {
   const [g,clear]=this.store.guard("SELECT 1 FROM jwt_v2_receive_snapshots WHERE snapshot_id=? AND status IN('VERIFIED','APPLIED')",[snapshotId]);
   const [pending,pendingClear]=this.store.guard("SELECT 1 FROM jwt_v2_receive_requests WHERE request_id=? AND status IN('PENDING','COMPLETE')",[meta.requestId]);
   await this.store.batch([g,pending,this.store.stmt("UPDATE jwt_v2_receive_snapshots SET status='APPLIED' WHERE snapshot_id=?",snapshotId),this.store.stmt("UPDATE jwt_v2_receive_requests SET status='COMPLETE' WHERE request_id=? AND status='PENDING'",meta.requestId),
-   this.store.stmt('INSERT INTO jwt_v2_event_streams(source_app,target_app,stream,owner_epoch,contiguous_through,highest_seen) VALUES(?,?,?,?,?,?) ON CONFLICT(source_app,target_app,stream,owner_epoch) DO UPDATE SET contiguous_through=max(contiguous_through,excluded.contiguous_through),highest_seen=max(highest_seen,excluded.highest_seen)',meta.ownerApp,meta.recipientApp,meta.stream,meta.ownerEpoch,meta.coveredThrough,meta.coveredThrough),pendingClear,clear]);
+   this.store.stmt('INSERT INTO jwt_v2_event_streams(source_app,target_app,stream,owner_epoch,contiguous_through,highest_seen) VALUES(?,?,?,?,?,?) ON CONFLICT(source_app,target_app,stream,owner_epoch) DO UPDATE SET contiguous_through=max(contiguous_through,excluded.contiguous_through),highest_seen=max(highest_seen,excluded.highest_seen)',meta.ownerApp,meta.recipientApp,meta.stream,meta.ownerEpoch,meta.coveredThrough,meta.coveredThrough),...sharedBaselineHeadPlan(this.store,meta),pendingClear,clear]);
   return {status:'APPLIED',publicationPending:false,snapshotId,coveredThrough:meta.coveredThrough};
  }
 }

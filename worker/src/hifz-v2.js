@@ -1,3 +1,4 @@
+import {childAuthorityRequest,withoutCookies,withoutSetCookie} from '../../security/v2/http-cookie-boundary.mjs';
 import {handleNativeProfile,PROFILE_PATH} from '../../security/v2/profile-service.mjs';
 import {HIFZ_PUBLIC_ASSETS} from './v111-public-assets.js';
 import {guardedHifzDB} from './v111-guarded-db.js';
@@ -6,6 +7,15 @@ export const HIFZ_V2_ORIGIN='https://mahadarwa-hifz.ummabbadacademy.app';
 const publicPaths=new Set(HIFZ_PUBLIC_ASSETS);
 const nativePaths=new Set(['/sabaq','/sabaq-dhor','/dhor','/reflections','/maktab/settings','/maktab/position','/maktab/attendance','/maktab/summary','/maktab/dhor-default-entry','/maktab/attendance-week','/maktab/attendance-register','/maktab/terms','/maktab/calendar','/maktab/calendar/holiday-proposal','/maktab/calendar/islamic-proposal','/maktab/calendar/confirm','/maktab/sabaq','/maktab/sabaq-dhor','/maktab/dhor','/plans','/attendance','/attendance/page','/attendance/haidh-settings','/attendance/mark-range','/attendance/predict','/position','/profile','/dhor-schedule/default-entry','/dhor-schedule/upcoming','/tajweed-tags','/tajweed-tags/update','/maktab-groups','/maktab-groups/update','/admin/users','/admin/reset-pin','/admin/change-role','/admin/register-student','/admin/create-teaching-profile','/admin/update-user']);
 const childAuth=new Set(['bootstrap','refresh','status','logout','switch','admission/start','admission/callback','admission/finalize','unlock/start','unlock/callback','unlock/finalize','draft-key','browser-clear'].map(p=>'/auth/v2/'+p));
+const sharedEntryMethods=new Map([
+ ['/auth/v2/shared-entry',['GET','POST']],
+ ['/auth/v2/shared-entry/start',['POST']],
+ ['/auth/v2/shared-entry/status',['POST']],
+ ['/auth/v2/shared-entry/continue',['POST']],
+ ['/auth/v2/shared-entry/callback',['GET','POST']],
+ ['/auth/v2/shared-entry/return.mjs',['GET']],
+ ['/auth/v2/shared-entry-client.mjs',['GET']]
+]);
 const internalAuth=new Set(['transactions','redeem','events','reconcile','incidents','logout'].map(p=>'/internal/auth/v2/'+p));
 const identityWrites=new Set(['/admin/reset-pin','/admin/change-role','/admin/register-student','/admin/create-teaching-profile','/admin/update-user']);
 const fail=(code,status)=>new Response(JSON.stringify({error:code,code}),{status,headers:{'Content-Type':'application/json','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
@@ -23,13 +33,23 @@ export function createHifzV2Handler({runtimeFactory,dispatchNative}) {
   if(url.origin!==HIFZ_V2_ORIGIN)return fail('UNTRUSTED_APP_ORIGIN',421);
   if(path.includes('%')||path.includes('\\'))return fail('INVALID_ROUTE',400);
   try {
+   if((internalAuth.has(path)||path===PROFILE_PATH)&&(request.headers.has('Cookie')||request.headers.has('Origin'))){
+    return path===PROFILE_PATH?fail('PROFILE_REQUEST_FORBIDDEN',403):fail('SERVICE_TRANSPORT_ONLY',401);
+   }
+   request=childAuthorityRequest(request);
    if(path===PROFILE_PATH)return noCors(await handleNativeProfile(await runtimeFactory(env),request));
+   if(sharedEntryMethods.has(path)){
+    if(!sharedEntryMethods.get(path).includes(request.method))return fail('METHOD_NOT_ALLOWED',405);
+    const response=await (await runtimeFactory(env)).handle(request,ctx);
+    // Only the fixed callback handler supplies CORS, after verifying Academy's exact Origin.
+    return path==='/auth/v2/shared-entry/callback'&&request.method==='POST'?response:noCors(response);
+   }
    if(childAuth.has(path)||internalAuth.has(path)||path==='/auth/v2/relay.mjs'){
     if(request.method!==(path==='/auth/v2/relay.mjs'?'GET':'POST'))return fail('METHOD_NOT_ALLOWED',405);
     const runtime=await runtimeFactory(env),response=await runtime.handle(request,ctx);
     return response instanceof Response?noCors(response):fail('AUTH_ROUTE_UNAVAILABLE',503);
    }
-   if(path==='/api/header-date'||path==='/api/health')return request.method==='GET'?noCors(await dispatchNative(request,env,ctx)):fail('METHOD_NOT_ALLOWED',405);
+   if(path==='/api/header-date'||path==='/api/health')return request.method==='GET'?noCors(withoutSetCookie(await dispatchNative(withoutCookies(request),env,ctx))):fail('METHOD_NOT_ALLOWED',405);
    if(path==='/api'||path.startsWith('/api/')) {
     const nativePath=path.slice(4);
     if(!nativePaths.has(nativePath)&&!/^\/maktab\/(?:terms|calendar)\/\d+$/.test(nativePath))return fail('NOT_FOUND',404);
@@ -39,7 +59,7 @@ export function createHifzV2Handler({runtimeFactory,dispatchNative}) {
     const cap=await runtime.authorise(request,{action}),actor=hifzActor(cap,runtime);
     const nativeEnv={...env,DB:guardedHifzDB(env.DB,()=>runtime.writeGuard(cap,{sensitive:action==='sensitive'}))};
     const target=new URL(request.url);target.pathname=nativePath;
-    const response=await dispatchNative(new Request(target,request),nativeEnv,ctx,actor);
+    const response=withoutSetCookie(await dispatchNative(new Request(target,withoutCookies(request)),nativeEnv,ctx,actor));
     return noCors(await runtime.decorate(response,cap));
    }
    // Explicit shell routes only. Protected/unknown paths never reach a SPA fallback.
@@ -59,7 +79,7 @@ export function createHifzV2Handler({runtimeFactory,dispatchNative}) {
    if(!['GET','HEAD'].includes(request.method))return fail('METHOD_NOT_ALLOWED',405);
    if(!env.ASSETS?.fetch)return fail('STATIC_ASSETS_UNAVAILABLE',503);
    const assetUrl=new URL(request.url);if(shell&&!path.startsWith('/_assets/'))assetUrl.pathname='/index.html';
-   const response=await env.ASSETS.fetch(new Request(assetUrl,{method:request.method}));
+   const response=withoutSetCookie(await env.ASSETS.fetch(new Request(assetUrl,{method:request.method})));
    if(!response.ok)return fail('ASSET_UNAVAILABLE',response.status===404?404:503);
    if(!shell){
     const type=response.headers.get('Content-Type')||'';
@@ -70,7 +90,12 @@ export function createHifzV2Handler({runtimeFactory,dispatchNative}) {
    }
    const h=new Headers(response.headers);h.delete('Content-Length');h.delete('Content-Encoding');
    h.set('Content-Type','text/html; charset=utf-8');h.set('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self' https://ummabbadacademy.app");
-   const html=request.method==='HEAD'?null:(await response.text()).replace('<head>','<head>\n<meta name="hifz-auth-mode" content="v2">');
+   let html=null;
+   if(request.method==='GET'){
+    const runtime=await runtimeFactory(env);
+    const sharedEntry=runtime.settings.raw.sharedChildEntry?'<meta name="hifz-shared-entry" content="enabled">':'';
+    html=(await response.text()).replace('<head>','<head>\n<meta name="hifz-auth-mode" content="v2">'+sharedEntry);
+   }
    return noCors(new Response(html,{status:200,headers:h}));
   } catch(error) {return fail(typeof error?.code==='string'?error.code:'HIFZ_V2_UNAVAILABLE',Number.isInteger(error?.status)&&error.status>=400&&error.status<=599?error.status:503);}
  };

@@ -1,3 +1,4 @@
+import {requireFamilyUpdateGeneration} from './update-boundary.mjs';
 import {canonical,strictJSON,requireThat,bytes,sha256,hex,equal} from './codec.mjs';
 import {primaryTransportFallback} from './fallback.mjs';
 import {assertCommittedControl} from './control-publication.mjs';
@@ -22,7 +23,7 @@ export async function recoverRuntimeAuthority(runtime,{token,sid,resourceKeys,ac
   loadPrimaryAppControl:()=>sourceControl(runtime,'control/app'),
   loadPrimaryResource:key=>sourceControl(runtime,'control/resource/'+key),
   readFence:()=>nativeFence(runtime.settings.db.withSession('first-primary'),{academy:runtime.app==='academy'}),
-  readVector:async()=>{if(!binding){const f=await runtime.store.family(sid);requireThat(f,'SESSION_ENDED',401);binding=JSON.parse(f.binding_json);}return vector(runtime,binding.sub);},
+  readVector:async()=>{if(!binding){const f=await runtime.store.family(sid);requireThat(f,'SESSION_ENDED',401);requireFamilyUpdateGeneration(runtime,f);binding=JSON.parse(f.binding_json);}return vector(runtime,binding.sub);},
   loadRights:async()=>{const capture=await runtime.native.capture({binding});return capture.rights;}
  });
  if(error.code.startsWith('RIGHTS_PAYLOAD_')){

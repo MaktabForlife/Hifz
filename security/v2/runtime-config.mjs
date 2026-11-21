@@ -1,3 +1,4 @@
+import {validateUpdateConfiguration} from './update-boundary.mjs';
 import registry from './native-authority.json' with {type:'json'};
 import {ORIGINS,profileConfig} from './tokens.mjs';
 import {strictJSON,requireThat,ascii,safeInt,unb64u,bytes,canonical} from './codec.mjs';
@@ -14,6 +15,31 @@ async function matchingPair(signing,verification){
 }
 const keyID=value=>ascii(value,64)&&/^[A-Za-z0-9._-]+$/.test(value);
 const publicMaterial=jwk=>canonical({kty:jwk.kty,crv:jwk.crv,x:jwk.x,y:jwk.y});
+async function sharedAcademyKeys(env,app,otherKeys){
+ if(app!=='academy')requireThat(!env.UAA_V2_SHARED_ACADEMY_PRIVATE_JWK,'SHARED_PRIVATE_KEY_WRONG_OWNER',503);
+ if(!env.UAA_V2_SHARED_ACADEMY_KEYS_JSON){
+  requireThat(!env.UAA_V2_SHARED_ACADEMY_PRIVATE_JWK,'SHARED_KEY_REGISTRY_REQUIRED',503);
+  return null;
+ }
+ const registry=parse(env.UAA_V2_SHARED_ACADEMY_KEYS_JSON,'SHARED_KEY_REGISTRY_REQUIRED');
+ requireThat(registry.issuer===ORIGINS.academy&&registry.env==='production'&&registry.purpose==='academy-shared-access'&&safeInt(registry.revision,1),'SHARED_KEY_REGISTRY_INVALID',503);
+ requireThat(keyID(registry.currentKid)&&Array.isArray(registry.keys)&&registry.keys.length>0&&registry.keys.length<=20,'SHARED_KEY_REGISTRY_INVALID',503);
+ const keys=new Map(),otherIDs=new Set(otherKeys.map(entry=>entry.kid));
+ const materials=new Set(otherKeys.map(entry=>publicMaterial(entry.jwk)));
+ for(const entry of registry.keys){
+  requireThat(keyID(entry?.kid)&&!keys.has(entry.kid),'SHARED_KEY_REGISTRY_CONFLICT',503);
+  const key=await ecKey(entry.jwk,false),material=publicMaterial(entry.jwk);
+  requireThat(!otherIDs.has(entry.kid)&&!materials.has(material),'KEY_PURPOSE_SEPARATION_REQUIRED',503);
+  keys.set(entry.kid,key);materials.add(material);
+ }
+ requireThat(keys.has(registry.currentKid),'CURRENT_SHARED_KEY_REQUIRED',503);
+ let signingKey=null;
+ if(app==='academy'){
+  signingKey=await ecKey(parse(env.UAA_V2_SHARED_ACADEMY_PRIVATE_JWK,'SHARED_SIGNER_REQUIRED'),true);
+  await matchingPair(signingKey,keys.get(registry.currentKid));
+ }
+ return {keys,signingKey,kid:registry.currentKid,revision:registry.revision};
+}
 const sourceDependencyRecipients=Object.freeze({'academy:native:hifz_profile_sync':'hifz','academy:studio-source-authority':'studio'});
 // Only projections with an actual native intake can establish a child issuance
 // receipt. Raw Academy counters must never become unfulfillable foreign floors.
@@ -33,7 +59,8 @@ export function selectedV2(request,env,app){
 export async function loadRuntimeConfiguration(env,app){
  requireThat(env.UAA_V2_ENABLED==='1'&&registry.app===app,'V2_RUNTIME_NOT_SELECTED',503);
  const raw=parse(env.UAA_V2_CONFIG,'V2_CONFIGURATION_REQUIRED');
- requireThat(raw.schema===2&&raw.app===app&&raw.env==='production'&&raw.publicOrigin===ORIGINS[app]&&raw.academyOrigin===ORIGINS.academy&&raw.activationEnabled===true&&raw.AIEnabled===false&&raw.snapshotSchema===3,'V2_CONFIGURATION_MISMATCH',503);
+ validateUpdateConfiguration(raw.offlineUpdate);
+ requireThat(raw.schema===2&&raw.app===app&&raw.env==='production'&&raw.publicOrigin===ORIGINS[app]&&raw.academyOrigin===ORIGINS.academy&&raw.activationEnabled===true&&raw.AIEnabled===false&&[3,4].includes(raw.snapshotSchema),'V2_CONFIGURATION_MISMATCH',503);
  requireThat(ascii(raw.generation,64)&&/^[A-Za-z0-9_-]+$/.test(raw.generation)&&ascii(raw.nativeOwnerEpoch)&&safeInt(raw.policyMinutes,15)&&raw.policyMinutes<=200,'V2_CONFIGURATION_MISMATCH',503);
  requireThat(Array.isArray(raw.nativeTables)&&raw.nativeTables.length>0&&raw.nativeTables.length<=256&&new Set(raw.nativeTables).size===raw.nativeTables.length&&raw.nativeTables.every(t=>Object.hasOwn(registry.rules,t)),'INSTALLED_NATIVE_MANIFEST_REQUIRED',503);
  requireThat(Object.entries(registry.rules).every(([t,r])=>!r.required||raw.nativeTables.includes(t)),'REQUIRED_NATIVE_OWNER_MISSING',503);
@@ -52,6 +79,7 @@ export async function loadRuntimeConfiguration(env,app){
  let handoffSigningKey=null;
  if(app==='academy'){requireThat(keyID(handoff.currentKid)&&handoffKeys.has(handoff.currentKid),'HANDOFF_SIGNER_REQUIRED',503);handoffSigningKey=await ecKey(parse(env.UAA_V2_HANDOFF_PRIVATE_JWK,'HANDOFF_SIGNER_REQUIRED'),true);await matchingPair(handoffSigningKey,handoffKeys.get(handoff.currentKid));}
  else requireThat(!env.UAA_V2_HANDOFF_PRIVATE_JWK,'HANDOFF_PRIVATE_KEY_WRONG_OWNER',503);
+ const sharedAcademy=await sharedAcademyKeys(env,app,[...api.keys,...handoff.keys]);
  const csrfKeys=parse(env.UAA_V2_CSRF_KEYS_JSON,'CSRF_KEYS_REQUIRED');
  const draftKeys=parse(env.UAA_V2_DRAFT_KEYS_JSON,'DRAFT_KEYS_REQUIRED');
  const symmetric=input=>{
@@ -88,6 +116,6 @@ export async function loadRuntimeConfiguration(env,app){
  requireThat(dependencies.size===(raw.foreignDependencies||[]).length,'DEPENDENCY_REGISTRY_CONFLICT',503);
  const db=app==='academy'?env.ACADEMY_DB:env.DB,bucket=env.AUTH_CACHE;
  requireThat(db?.withSession&&bucket?.get&&bucket?.put,'V2_OWNING_BINDINGS_REQUIRED',503);
- return {raw,config,db,bucket,registry,nativeTables,dependenciesFor,dependencies,apiKeys,apiSigningKey,apiKid:api.currentKid,handoffKeys,handoffSigningKey,handoffKid:handoff.currentKid,csrf,draft,serviceKeys,prefix:'auth-private/v2/'+raw.env+'/'+app+'/'+raw.generation+'/',callbacks:Object.fromEntries(Object.entries(ORIGINS).map(([name,origin])=>[name,{origin,callbacks:name==='academy'?[]:[origin+'/auth/v2/admission/callback',origin+'/auth/v2/unlock/callback'],returns:(raw.returns?.[name]||[origin+'/'])}]))};
+ return {raw,config,db,bucket,registry,nativeTables,dependenciesFor,dependencies,apiKeys,apiSigningKey,apiKid:api.currentKid,handoffKeys,handoffSigningKey,handoffKid:handoff.currentKid,sharedAcademy,csrf,draft,serviceKeys,prefix:'auth-private/v2/'+raw.env+'/'+app+'/'+raw.generation+'/',callbacks:Object.fromEntries(Object.entries(ORIGINS).map(([name,origin])=>[name,{origin,callbacks:name==='academy'?[]:[origin+'/auth/v2/admission/callback',origin+'/auth/v2/unlock/callback'],returns:(raw.returns?.[name]||[origin+'/'])}]))};
 }
 export const runtimeConfigurationBoundary=Object.freeze({source:'Configuration is server-installed and bound to exact owner/origin/native manifest; request headers never select keys, namespaces or dependencies.',activation:'The committed source manifests stay disabled. Tests may explicitly select a disposable local runtime; no import installs schema or activates hosted state.'});

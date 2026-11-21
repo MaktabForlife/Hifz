@@ -20,6 +20,7 @@ async function bootstrap(runtime,request,body){
  const supplied=expectedContext(request,body),context=c?selector(JSON.parse(c.family.binding_json),runtime.app):null;
  if(supplied&&context&&!sameStable(supplied,context))return runtime.json({success:true,state:'SIGNED_OUT',context:null,outcome:'SUPERSEDED'});
  if(purpose==='status'&&!c)return runtime.json({success:true,state:'SIGNED_OUT',context:null,outcome:'UNCONFIRMED'});
+ if(runtime.settings.raw.sharedChildEntry&&['admission/start','admission/finalize'].includes(purpose))requireThat(false,'ACADEMY_SIGN_IN_REQUIRED',401);
  if(['admission/start','admission/finalize','unlock/start','unlock/finalize'].includes(purpose))return journeyBootstrap(runtime,request,body,c);
  if(purpose==='admission/proceed'){const {proceedAcademy}=await import('./http-shells.mjs');return proceedAcademy(runtime,request,body,c);}
  if(purpose==='browser-clear'&&!c){const transactions=new HTTPTransactions(runtime),row=await transactions.create({kind:'browser-clear',payload:{}});return runtime.json({success:true,state:'SIGNED_OUT',context:null,...await transactions.dto(row)});}
@@ -65,6 +66,15 @@ export async function handleAuthHTTP(runtime,request,ctx){
  const url=new URL(request.url),path=url.pathname;
  if(path.startsWith('/internal/auth/v2/')){const {handleServiceHTTP}=await import('./http-service.mjs');return handleServiceHTTP(runtime,request,ctx);}
  if(request.method==='GET'){
+  if(path==='/auth/v2/shared-entry/callback'&&!url.search){
+   const {sharedBookmarkCallbackShell}=await import('./shared-entry.mjs');return sharedBookmarkCallbackShell(runtime);
+  }
+  if(path==='/auth/v2/shared-entry/return.mjs'&&!url.search){
+   const {sharedBookmarkClient}=await import('./shared-entry.mjs');return sharedBookmarkClient(runtime);
+  }
+  if(path==='/auth/v2/shared-entry'||path==='/auth/v2/shared-entry-client.mjs'){
+   const {sharedEntryPage}=await import('./shared-entry.mjs');return sharedEntryPage(runtime,request);
+  }
   if(path==='/auth/v2/relay.mjs')return relayModule(runtime);
   if(path==='/auth/v2/browser-session.mjs'||path==='/auth/v2/browser-drafts.mjs'){
    requireThat(['GET','HEAD'].includes(request.method),'METHOD_NOT_ALLOWED',405);
@@ -76,8 +86,22 @@ export async function handleAuthHTTP(runtime,request,ctx){
  }
  requireThat(request.method==='POST'&&!url.search,'METHOD_NOT_ALLOWED',405);
  for(const purpose of ['admission','unlock'])if(path==='/auth/v2/'+purpose+'/callback')return callbackRelay(runtime,request,purpose);
+ if(path==='/auth/v2/shared-entry/callback'){
+  const {sharedBookmarkCallback}=await import('./shared-entry.mjs');return sharedBookmarkCallback(runtime,request);
+ }
+ for(const purpose of ['admission','unlock'])if(path==='/auth/v2/'+purpose+'/callback')return callbackRelay(runtime,request,purpose);
  verifyBootstrap(request,runtime.config);requireThat(/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(request.headers.get('Content-Type')||''),'JSON_BODY_REQUIRED',415);
  const body=await browserBody(request);requireThat(body&&typeof body==='object'&&!Array.isArray(body),'INVALID_AUTH_BODY',400);
+ if(path==='/auth/v2/shared-entry/continue'){
+  const {continueSharedBookmark}=await import('./shared-entry.mjs');return continueSharedBookmark(runtime,request,body);
+ }
+ if(path==='/auth/v2/shared-entry/status'){
+  const {observeSharedEntry}=await import('./shared-entry.mjs');return observeSharedEntry(runtime,request,body);
+ }
+ if(path==='/auth/v2/shared-entry/start'||path==='/auth/v2/shared-entry'){
+  const {startSharedEntry,completeSharedEntry}=await import('./shared-entry.mjs');
+  return path.endsWith('/start')?startSharedEntry(runtime,request,body):completeSharedEntry(runtime,request,body);
+ }
  if(path==='/auth/v2/bootstrap')return bootstrap(runtime,request,body);
  if(path==='/auth/v2/admission/start'&&runtime.app==='academy'){const {continueAcademy}=await import('./http-shells.mjs');return continueAcademy(runtime,request,body);}
  if(path==='/auth/v2/refresh')return rotateFamily(runtime,request,body);
@@ -85,6 +109,7 @@ export async function handleAuthHTTP(runtime,request,ctx){
  if(path==='/auth/v2/pin')return submitPIN(runtime,request,body);
  if(path==='/auth/v2/pin/setup')return submitPIN(runtime,request,body,{setup:true});
  if(path==='/auth/v2/logout'||path==='/auth/v2/switch')return exit(runtime,request,body,path.split('/').at(-1));
+ if(runtime.settings.raw.sharedChildEntry&&['/auth/v2/admission/start','/auth/v2/admission/finalize'].includes(path))requireThat(false,'ACADEMY_SIGN_IN_REQUIRED',401);
  for(const purpose of ['admission','unlock']){if(path==='/auth/v2/'+purpose+'/start')return startJourney(runtime,request,body,purpose);if(path==='/auth/v2/'+purpose+'/finalize')return finalizeJourney(runtime,request,body,purpose);}
  if(path==='/auth/v2/draft-key'){const {releaseDraftKey}=await import('./http-drafts.mjs');return releaseDraftKey(runtime,request,body);}
  if(path==='/auth/v2/browser-clear'){

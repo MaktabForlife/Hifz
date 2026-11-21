@@ -3,7 +3,7 @@ const EVENT='schema env sourceApp targetApp eventId operationId stream ownerEpoc
 const KINDS={'credential-epoch-advanced':'credentialEpoch','account-revoked':'accountCutoff','parent-revoked':'parent','browser-superseded':'browser','authority-updated':'dependency','policy-updated':'policy','key-withdrawn':'key'};
 const TARGETS={accountCutoff:'type sub maxCe maxAe reason incidentId',credentialEpoch:'type sub newCe reason',parent:'type sub psid bsid bv ce ae',browser:'type bsid maxBv',dependency:'type id ownerEpoch revision effect deniedActions',policy:'type policyId ownerEpoch revision inactivityMinutes',key:'type purpose kid registryRevision'};
 export const BUCKETS=['accountCutoffs','credentialFloors','parentCutoffs','browserCutoffs','localCutoffs','keyWithdrawals','policies','dependencyFloors'];
-const REASONS=['VOLUNTARY_LOGOUT','VERIFIED_REFRESH_REUSE','SUSPICIOUS_ACTIVITY','CONFIRMED_KEY_COMPROMISE','ACCOUNT_DISABLED'];
+const REASONS=['VOLUNTARY_LOGOUT','VERIFIED_REFRESH_REUSE','SUSPICIOUS_ACTIVITY','CONFIRMED_KEY_COMPROMISE','ACCOUNT_DISABLED','OFFLINE_UPDATE'];
 export function validateTarget(target,{sub,dependencies=new Map(),ownerEpoch,targetApp}={}){
  requireThat(TARGETS[target?.type],'UNKNOWN_TARGET',400);exact(target,TARGETS[target.type].split(' '));
  for(const [k,v] of Object.entries(target)){
@@ -21,7 +21,7 @@ export function validateTarget(target,{sub,dependencies=new Map(),ownerEpoch,tar
    requireThat(target.effect==='INVALIDATE'?target.deniedActions.length===0:target.deniedActions.length>0,'INVALID_EFFECT',400);break;
   }
   case 'policy':requireThat(sub===null&&target.policyId==='session-inactivity'&&target.ownerEpoch===ownerEpoch&&safeInt(target.inactivityMinutes,15)&&target.inactivityMinutes<=200,'INVALID_POLICY',400);break;
-  case 'key':requireThat(sub===null&&target.purpose==='academy-handoff'&&/^[A-Za-z0-9._-]{1,64}$/.test(target.kid),'INVALID_KEY_TARGET',400);break;
+  case 'key':requireThat(sub===null&&['academy-handoff','academy-shared-access'].includes(target.purpose)&&/^[A-Za-z0-9._-]{1,64}$/.test(target.kid),'INVALID_KEY_TARGET',400);break;
  }
  return target;
 }

@@ -37,7 +37,12 @@
  };
  state.journey=async()=>{
   await state.ready;
-  const result=state.session.getContext()?await state.session.beginUnlock({returnTo:'/'}):await state.session.beginAdmission({returnTo:'/'});
+  const context=state.session.getContext();
+  if(!context&&document.querySelector('meta[name="hifz-shared-entry"][content="enabled"]')){
+   location.assign('/auth/v2/shared-entry?area=hifz');
+   return;
+  }
+  const result=context?await state.session.beginUnlock({returnTo:'/'}):await state.session.beginAdmission({returnTo:'/'});
   if(!result?.navigateUrl)throw new Error('Academy sign-in is temporarily unavailable.');
   const target=new URL(result.navigateUrl);if(target.origin!=='https://ummabbadacademy.app')throw new Error('Academy sign-in address is unavailable.');location.assign(target.href);
  };

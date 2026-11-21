@@ -18,16 +18,22 @@ export const controlPublicationSchemaSQL=[
 ].join('\n');
 const envelope=['schema','generation','incarnation','state','publicationNonce'];
 const appRequired=['cr','app','env','policyEpoch','policyRevision','keyRegistryEpoch','keyRegistryRevision','withdrawnKids','migrationFloor','inactivityMinutes'];
-const appOptional=['withdrawnHandoffKids','handoffRegistryEpoch','handoffRegistryRevision','denied','authorityReady','enforcedTargets'];
+const appOptional=['withdrawnHandoffKids','handoffRegistryEpoch','handoffRegistryRevision','sharedAcademyRegistryRevision','withdrawnSharedAcademyKids','denied','authorityReady','enforcedTargets'];
 const resourceRequired=['cr','app','env','resourceId','ownerEpoch','revision','deniedActions'];
 const q=n=>{requireThat(typeof n==='string'&&/^[a-z_][a-z0-9_]*$/i.test(n)&&!/^sqlite_/i.test(n),'INVALID_NATIVE_PROVENANCE_IDENTIFIER',503);return '"'+n+'"';};
 const ref=s=>requireThat(ascii(s,512),'CONTROL_SOURCE_RECEIPT_REQUIRED',503);
 const superset=(next,old)=>old.every(k=>next.includes(k));
 function list(v,code,kids=false){requireThat(Array.isArray(v)&&v.every(k=>kids?/^[A-Za-z0-9._-]{1,64}$/.test(k):ascii(k))&&new Set(v).size===v.length,code,503);}
 function registryOf(p){
- const r={keyRegistryEpoch:p.keyRegistryEpoch,keyRegistryRevision:p.keyRegistryRevision,withdrawnKids:p.withdrawnKids,handoffRegistryEpoch:p.handoffRegistryEpoch??p.keyRegistryEpoch,handoffRegistryRevision:p.handoffRegistryRevision??p.keyRegistryRevision,withdrawnHandoffKids:p.withdrawnHandoffKids??[]};
+ const r={keyRegistryEpoch:p.keyRegistryEpoch,keyRegistryRevision:p.keyRegistryRevision,withdrawnKids:p.withdrawnKids,handoffRegistryEpoch:p.handoffRegistryEpoch??p.keyRegistryEpoch,handoffRegistryRevision:p.handoffRegistryRevision??p.keyRegistryRevision,withdrawnHandoffKids:p.withdrawnHandoffKids??[],...(p.sharedAcademyRegistryRevision===undefined?{}:{sharedAcademyRegistryRevision:p.sharedAcademyRegistryRevision,withdrawnSharedAcademyKids:p.withdrawnSharedAcademyKids})};
  requireThat(ascii(r.keyRegistryEpoch)&&ascii(r.handoffRegistryEpoch)&&safeInt(r.keyRegistryRevision,1)&&safeInt(r.handoffRegistryRevision,1),'MALFORMED_KEY_REGISTRY',503);
- list(r.withdrawnKids,'MALFORMED_KEY_REGISTRY',true);list(r.withdrawnHandoffKids,'MALFORMED_KEY_REGISTRY',true);return r;
+ list(r.withdrawnKids,'MALFORMED_KEY_REGISTRY',true);list(r.withdrawnHandoffKids,'MALFORMED_KEY_REGISTRY',true);
+ requireThat((p.sharedAcademyRegistryRevision===undefined)===(p.withdrawnSharedAcademyKids===undefined),'MALFORMED_KEY_REGISTRY',503);
+ if(r.sharedAcademyRegistryRevision!==undefined){
+  requireThat(safeInt(r.sharedAcademyRegistryRevision,1),'MALFORMED_KEY_REGISTRY',503);
+  list(r.withdrawnSharedAcademyKids,'MALFORMED_KEY_REGISTRY',true);
+ }
+ return r;
 }
 function semantic(p){requireThat(p&&typeof p==='object'&&!Array.isArray(p),'MALFORMED_CONTROL',503);return Object.fromEntries(Object.entries(p).filter(([key])=>!envelope.includes(key)));}
 async function checked(store,suffix,input,{allowEnvelope=false}={}){
@@ -68,6 +74,12 @@ export async function registryControlPlan(store,{registry,receiptRef,predecessor
   const prior=JSON.parse(old.registry_json);
   requireThat(predecessor&&predecessor.epoch===prior.keyRegistryEpoch&&predecessor.revision===prior.keyRegistryRevision&&(predecessor.receiptRef===undefined||predecessor.receiptRef===old.receipt_ref),'REGISTRY_BRIDGE_REQUIRED',409);
   requireThat(superset(value.withdrawnKids,prior.withdrawnKids)&&superset(value.withdrawnHandoffKids,prior.withdrawnHandoffKids),'KEY_WITHDRAWAL_ROLLBACK',409);
+  if(prior.sharedAcademyRegistryRevision!==undefined){
+   requireThat(value.sharedAcademyRegistryRevision>=prior.sharedAcademyRegistryRevision
+    &&superset(value.withdrawnSharedAcademyKids,prior.withdrawnSharedAcademyKids),'KEY_WITHDRAWAL_ROLLBACK',409);
+   requireThat(value.sharedAcademyRegistryRevision>prior.sharedAcademyRegistryRevision
+    ||canonical(value.withdrawnSharedAcademyKids)===canonical(prior.withdrawnSharedAcademyKids),'KEY_REGISTRY_REVISION_ROLLBACK',409);
+  }
   for(const [epoch,revision,withdrawn] of [['keyRegistryEpoch','keyRegistryRevision','withdrawnKids'],['handoffRegistryEpoch','handoffRegistryRevision','withdrawnHandoffKids']]){
    if(value[epoch]===prior[epoch])requireThat(value[revision]>=prior[revision]&&(value[revision]>prior[revision]||canonical(value[withdrawn])===canonical(prior[withdrawn])),'KEY_REGISTRY_REVISION_ROLLBACK',409);
    else{

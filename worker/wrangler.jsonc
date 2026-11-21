@@ -9,7 +9,7 @@
 
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "hifzhelper-api",
-  "main": "src/index.js",
+  "main": "src/deployment.js",
   "compatibility_date": "2026-07-17",
 
   "env": {

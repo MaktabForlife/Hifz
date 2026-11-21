@@ -3,9 +3,14 @@ export const APPS=['academy','studio','hifz'];
 export const ORIGINS=Object.freeze({academy:'https://ummabbadacademy.app',studio:'https://worshipuponbaseera.ummabbadacademy.app',hifz:'https://mahadarwa-hifz.ummabbadacademy.app'});
 const API='ver env iss aud sub sid psid bsid bv ce ae le sv ue pv vat iat exp s_iat s_exp jti'.split(' ');
 const COMMON='ver env iss aud sub psid bsid bv ce ae s_iat s_exp tx jti iat exp'.split(' ');
-const FIELDS={api:API,admission:[...COMMON,'afg'],unlock:[...COMMON,'sid','le','sv','ue']};
+const FIELDS={api:API,shared:[...API,'afg'],admission:[...COMMON,'afg'],unlock:[...COMMON,'sid','le','sv','ue']};
 const signatureReceipts=new WeakMap();
-const TYPES={api:'uaa-access+jwt',admission:'uaa-admission+jwt',unlock:'uaa-unlock+jwt'};
+const TYPES={api:'uaa-access+jwt',shared:'uaa-academy-shared-access+jwt',admission:'uaa-admission+jwt',unlock:'uaa-unlock+jwt'};
+export const ACADEMY_SHARED_AUDIENCES=Object.freeze([
+ 'urn:uaa:production:academy:api:v2',
+ 'urn:uaa:production:studio:admission:shared:v1',
+ 'urn:uaa:production:hifz:admission:shared:v1'
+]);
 export const BINDING='ver env iss aud sub sid psid bsid bv ce ae le sv ue pv vat s_iat s_exp'.split(' ');
 export function profileConfig({app,env='production',origin=ORIGINS[app],academyOrigin=ORIGINS.academy}){
  requireThat(APPS.includes(app)&&['feature','production'].includes(env),'INVALID_CONFIG',503);
@@ -13,29 +18,38 @@ export function profileConfig({app,env='production',origin=ORIGINS[app],academyO
  return Object.freeze({app,env,origin,academyOrigin});
 }
 function validate(c,p,cfg,{now,idleUntil,timedUntil=Number.MAX_SAFE_INTEGER,initial=false,allowExpired=false}={}){
- exact(c,FIELDS[p]);requireThat(c.ver===2&&c.env===cfg.env&&c.iss===(p==='api'?cfg.origin:cfg.academyOrigin),'WRONG_ISSUER');
- requireThat(c.aud==='urn:uaa:'+cfg.env+':'+cfg.app+':'+(p==='api'?'api':p)+':v2','WRONG_AUDIENCE');
+ const shared=p==='shared',api=p==='api'||shared;
+ exact(c,FIELDS[p]);
+ if(shared){
+  requireThat(cfg.env==='production'&&cfg.origin===ORIGINS[cfg.app]&&cfg.academyOrigin===ORIGINS.academy,'INVALID_SHARED_CONFIG',503);
+  requireThat(Array.isArray(c.aud)&&c.aud.length===ACADEMY_SHARED_AUDIENCES.length&&ACADEMY_SHARED_AUDIENCES.every((aud,index)=>c.aud[index]===aud),'WRONG_AUDIENCE');
+ }else{
+  requireThat(c.aud==='urn:uaa:'+cfg.env+':'+cfg.app+':'+p+':v2','WRONG_AUDIENCE');
+ }
+ const issuer=shared?ORIGINS.academy:api?cfg.origin:cfg.academyOrigin;
+ requireThat(c.ver===2&&c.env===cfg.env&&c.iss===issuer,'WRONG_ISSUER');
  requireThat(typeof c.sub==='string'&&c.sub.length>0&&bytes(c.sub).length<=180&&!/[\u0000-\u0020\u007f]/.test(c.sub),'INVALID_SUBJECT');
- for(const field of ['psid','bsid','jti',...(p==='api'||p==='unlock'?['sid']:[]),...(p!=='api'?['tx']:[])])requireThat(uuid(c[field]),'INVALID_UUID');
- for(const k of ['bv','ce','ae',...(p==='api'||p==='unlock'?['sv']:[])])requireThat(safeInt(c[k],1),'INVALID_COUNTER');
- for(const k of p==='api'||p==='unlock'?['le','ue']:[])requireThat(safeInt(c[k]),'INVALID_COUNTER');
- for(const k of ['iat','exp','s_iat','s_exp',...(p==='api'?['vat']:[]),...(p==='admission'?['afg']:[])])requireThat(safeInt(c[k]),'INVALID_TIME');
+ for(const field of ['psid','bsid','jti',...(api||p==='unlock'?['sid']:[]),...(!api?['tx']:[])])requireThat(uuid(c[field]),'INVALID_UUID');
+ for(const k of ['bv','ce','ae',...(api||p==='unlock'?['sv']:[])])requireThat(safeInt(c[k],1),'INVALID_COUNTER');
+ for(const k of api||p==='unlock'?['le','ue']:[])requireThat(safeInt(c[k]),'INVALID_COUNTER');
+ for(const k of ['iat','exp','s_iat','s_exp',...(api?['vat']:[]),...(shared||p==='admission'?['afg']:[])])requireThat(safeInt(c[k]),'INVALID_TIME');
  requireThat(safeInt(now)&&c.iat<=now+30&&c.s_exp-c.s_iat===604800&&c.s_iat<=c.iat&&c.iat<c.exp&&c.exp<=c.s_exp,'INVALID_TIME');
  if(!allowExpired)requireThat(now<c.exp,'TOKEN_EXPIRED');
- if(p==='api'){
+ if(api){
   requireThat(typeof c.pv==='string'&&c.pv.length===43,'INVALID_VECTOR_DIGEST');unb64u(c.pv,32);
   requireThat(initial==='PRECHECK'?c.vat<=c.iat:initial?c.vat<=c.s_iat&&c.s_iat<=c.iat:c.s_iat<=c.vat&&c.vat<=c.iat,'INVALID_VALIDATION_TIME');
   requireThat(safeInt(idleUntil)&&safeInt(timedUntil)&&c.exp<=Math.min(c.iat+900,c.vat+900,idleUntil,timedUntil),'INVALID_LEASE');
   requireThat(now<Math.min(c.vat+900,idleUntil,timedUntil,c.s_exp)||allowExpired,'LEASE_EXPIRED');
-  if(cfg.app==='academy')requireThat(c.sid===c.psid,'INVALID_PARENT');
+  if(shared||cfg.app==='academy')requireThat(c.sid===c.psid,'INVALID_PARENT');
  }else{
   requireThat(cfg.app!=='academy'&&c.exp===Math.min(c.iat+60,c.s_exp),'INVALID_PROOF');
-  if(p==='admission')requireThat(c.s_iat<=c.afg&&c.afg<=c.iat,'INVALID_FOREGROUND');
  }
+ if(shared||p==='admission')requireThat(c.s_iat<=c.afg&&c.afg<=c.iat,'INVALID_FOREGROUND');
  return c;
 }
 export async function issueToken(claims,{profile='api',config,key,kid,...limits}){
  requireThat(FIELDS[profile]&&ascii(kid,64)&&/^[A-Za-z0-9._-]+$/.test(kid),'INVALID_KEY_ID',503);
+ requireThat(profile!=='shared'||config.app==='academy','SHARED_ISSUER_REQUIRED',503);
  validate(claims,profile,config,limits);
  const header=b64u(bytes(canonical({alg:'ES256',typ:TYPES[profile],kid}))),body=b64u(bytes(canonical(claims))),input=header+'.'+body;
  const signature=new Uint8Array(await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},key,bytes(input)));
@@ -56,7 +70,10 @@ export async function verifyToken(token,{profile='api',config,keys,withdrawn=new
   parsed=strictJSON(unb64u(parts[1]),{maxBytes:2048});
  }
  const claims=validate(parsed,profile,config,limits);
- if(projection)for(const field of BINDING)requireThat(claims[field]===projection[field],'SECURITY_BINDING_CHANGED');
+ if(projection)for(const field of BINDING){
+  const value=profile==='shared'&&field==='aud'?ACADEMY_SHARED_AUDIENCES[0]:claims[field];
+  requireThat(value===projection[field],'SECURITY_BINDING_CHANGED');
+ }
  return claims;
 }
 export function ownOrigin(request,config){
@@ -64,30 +81,49 @@ export function ownOrigin(request,config){
  requireThat(request.headers.get('Origin')===config.origin,'CROSS_ORIGIN',403);
 }
 const COOKIES={academy:['__Host-uaa_a','__Host-uaa_r'],studio:['__Host-studio_a','__Host-studio_r'],hifz:['__Host-hifz_a','__Host-hifz_r']};
-export function readCookies(header,app){
- const source=header??'';requireThat(typeof source==='string','INVALID_COOKIE_HEADER',400);
- requireThat(bytes(source).length<=8192,'COOKIE_HEADER_TOO_LARGE',431);
- requireThat(COOKIES[app],'INVALID_CONFIG',503);const values=Object.create(null);
- for(const part of source.split(';')){
-  const i=part.indexOf('=');if(i<0)continue;const name=part.slice(0,i).trim();
-  if(!COOKIES[app].includes(name))continue;
-  requireThat(!Object.hasOwn(values,name),'DUPLICATE_COOKIE');values[name]=part.slice(i+1);
- }
- if(Object.hasOwn(values,COOKIES[app][1]))unb64u(values[COOKIES[app][1]],32);
- return {access:values[COOKIES[app][0]],refresh:values[COOKIES[app][1]]};
+export const ACADEMY_SHARED_COOKIE='__Secure-uaa_shared_a';
+const academyCookieDomain='; Domain=ummabbadacademy.app';
+function cookieNames(app,sharedAccess){
+ requireThat(COOKIES[app]&&(!sharedAccess||app==='academy'),'INVALID_CONFIG',503);
+ return sharedAccess?[ACADEMY_SHARED_COOKIE,COOKIES[app][1]]:COOKIES[app];
 }
-export function cookiePair({app,access,refresh,now,accessExpires,originalExpires}){
- requireThat(COOKIES[app]&&safeInt(now)&&safeInt(accessExpires)&&safeInt(originalExpires),'INVALID_COOKIE',503);
+function selectedCookies(header,names){
+ const source=header??'';
+ requireThat(typeof source==='string','INVALID_COOKIE_HEADER',400);
+ requireThat(bytes(source).length<=8192,'COOKIE_HEADER_TOO_LARGE',431);
+ const values=Object.create(null);
+ for(const part of source.split(';')){
+  const i=part.indexOf('=');
+  if(i<0)continue;
+  const name=part.slice(0,i).trim();
+  if(!names.includes(name))continue;
+  requireThat(!Object.hasOwn(values,name),'DUPLICATE_COOKIE');
+  values[name]=part.slice(i+1);
+ }
+ return values;
+}
+export function readCookies(header,app,{sharedAccess=false}={}){
+ const names=cookieNames(app,sharedAccess),values=selectedCookies(header,names);
+ if(Object.hasOwn(values,names[1]))unb64u(values[names[1]],32);
+ return {access:values[names[0]],refresh:values[names[1]]};
+}
+export function readSharedAcademyAccess(header){
+ return selectedCookies(header,[ACADEMY_SHARED_COOKIE])[ACADEMY_SHARED_COOKIE];
+}
+export function cookiePair({app,access,refresh,now,accessExpires,originalExpires,sharedAccess=false}){
+ const names=cookieNames(app,sharedAccess);
+ requireThat(safeInt(now)&&safeInt(accessExpires)&&safeInt(originalExpires),'INVALID_COOKIE',503);
  requireThat(accessExpires>now&&accessExpires<=now+900&&originalExpires>now&&originalExpires<=now+604800,'INVALID_COOKIE_DEADLINE',503);
  requireThat(typeof access==='string'&&!/[;\r\n]/.test(access),'INVALID_COOKIE',503);unb64u(refresh,32);
- return [access,refresh].map((value,i)=>COOKIES[app][i]+'='+value+'; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age='+((i?originalExpires:accessExpires)-now)+'; Expires='+new Date((i?originalExpires:accessExpires)*1000).toUTCString());
+ return [access,refresh].map((value,i)=>names[i]+'='+value+(sharedAccess&&i===0?academyCookieDomain:'')+'; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age='+((i?originalExpires:accessExpires)-now)+'; Expires='+new Date((i?originalExpires:accessExpires)*1000).toUTCString());
 }
 
-export async function preverifyAPI(token,{config,keys,now}){
- const claims=Object.freeze(await verifyToken(token,{config,keys,now,idleUntil:Number.MAX_SAFE_INTEGER,timedUntil:Number.MAX_SAFE_INTEGER,initial:'PRECHECK'}));
+export async function preverifyAPI(token,{config,keys,now,profile='api'}){
+ requireThat(profile==='api'||profile==='shared'&&config.app==='academy','WRONG_TOKEN_PROFILE');
+ const claims=Object.freeze(await verifyToken(token,{config,keys,now,profile,idleUntil:Number.MAX_SAFE_INTEGER,timedUntil:Number.MAX_SAFE_INTEGER,initial:'PRECHECK'}));
  const header=strictJSON(unb64u(token.split('.')[0]));
  const selector=Object.freeze({sid:claims.sid,sub:claims.sub,kid:header.kid});
- signatureReceipts.set(selector,{token,config,keys,key:keys.get(header.kid),profile:'api',claims});
+ signatureReceipts.set(selector,{token,config,keys,key:keys.get(header.kid),profile,claims});
  return selector; // authenticated selector only, no authority before current durable controls.
 }
 
@@ -95,4 +131,6 @@ export function refreshOnlyCookie({app,refresh,now,originalExpires}){
  requireThat(COOKIES[app]&&safeInt(now)&&safeInt(originalExpires)&&originalExpires>now&&originalExpires<=now+604800,'INVALID_COOKIE_DEADLINE',503);unb64u(refresh,32);
  return COOKIES[app][1]+'='+refresh+'; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age='+(originalExpires-now)+'; Expires='+new Date(originalExpires*1000).toUTCString();
 }
-export function clearCookies(app){requireThat(COOKIES[app],'INVALID_CONFIG',503);return COOKIES[app].map(name=>name+'=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT');}
+export function clearCookies(app,{sharedAccess=false}={}){
+ return cookieNames(app,sharedAccess).map((name,index)=>name+'='+(sharedAccess&&index===0?academyCookieDomain:'')+'; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT');
+}

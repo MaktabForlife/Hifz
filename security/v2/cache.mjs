@@ -113,13 +113,20 @@ export class SecurityCache {
   requireThat(written,'PUBLICATION_RETRY',409);
   await this.store.published(key,candidate.cr,{cr:candidate.cr,nonce:candidate.publicationNonce,incarnation:candidate.incarnation,generation:candidate.generation,digest:await digest(candidate),etag:written.etag});return candidate;
  }
- async authorise({token,sessionKey,config,keys,now,rightsMemo=new Map(),resourceKeys=[],action}){
+ async authorise({token,sessionKey,config,keys,now,rightsMemo=new Map(),resourceKeys=[],action,sharedChildEntry,updateGeneration}){
   const verified=await preverifyAPI(token,{config,keys,now});
   requireThat(verified.sid===sessionKey,'SECURITY_SELECTOR_MISMATCH');
   const app=(await this.read('control/app')).value;
   requireThat(!app.withdrawnKids.includes(verified.kid),'UNTRUSTED_KEY');
   const session=(await this.read('security/session/'+sessionKey)).value;
   requireThat(app.app===config.app&&app.env===config.env&&session.app===config.app&&session.env===config.env,'WRONG_SECURITY_NAMESPACE');
+  if(sharedChildEntry){
+   const {validateSharedChildSource}=await import('./shared-entry.mjs');
+   validateSharedChildSource(session.binding,session.sharedAcademyAdmission,sharedChildEntry);
+   requireThat(Array.isArray(app.withdrawnSharedAcademyKids)&&!app.withdrawnSharedAcademyKids.includes(session.sharedAcademyAdmission.kid),'SESSION_ENDED',401);
+  }
+  requireThat(!['REVOKED','EXPIRED'].includes(session.localState),'SESSION_ENDED',401);
+  requireThat(updateGeneration===undefined||session.updateGeneration===updateGeneration,'SESSION_ENDED',401);
   requireThat(session.localState==='UNLOCKED','SESSION_NOT_UNLOCKED',['LOCKED','ADMITTED_LOCKED'].includes(session.localState)?423:401);
   requireThat(session.authorityReady,'PERMISSIONS_REFRESH_REQUIRED',503);
   requireThat(typeof action==='string'&&action.length>0,'ACTION_CONTEXT_REQUIRED',503);

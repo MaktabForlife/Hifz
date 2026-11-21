@@ -1,6 +1,7 @@
 import {verifiedPolicyCoverage} from './policy-coverage.mjs';
 import {scopedVectorId,dependencyScope} from './issuance-floors.mjs';
 import {coversFloor} from './floors.mjs';
+import {coversKeyWithdrawal} from './key-withdrawal.mjs';
 import {canonical,requireThat,digest} from './codec.mjs';
 
 function where(t){
@@ -10,13 +11,16 @@ function where(t){
   case 'parent':return {sql:'sub=? AND psid=? AND bsid=? AND bv=? AND ce=? AND ae=?',args:[t.sub,t.psid,t.bsid,t.bv,t.ce,t.ae]};
   case 'localEpoch':return {sql:'sub=? AND ce=? AND ae=? AND le<=?',args:[t.sub,t.ce,t.ae,t.maxLe]};
   case 'browser':return {sql:'bsid=? AND bv<=?',args:[t.bsid,t.maxBv]};
+  case 'key':return t.purpose==='academy-shared-access'
+   ? {sql:"json_extract(projection_json,'$.sharedAcademyAdmission.kid')=?",args:[t.kid]}
+   : {sql:'1',args:[]};
   default:return {sql:'1',args:[]}; // policy/dependency/key changes must cover the complete selected owning-app set.
  }
 }
 export async function restrictionPlan(store,{workId,target,now,requiredControlKeys=[],sub=null}){
  const targetJSON=canonical(target),hash=await digest(target),base=where(target),scopeSub=sub??target.sub??null,w=scopeSub&&base.sql==='1'?{sql:'sub=?',args:[scopeSub]}:base;
  requireThat(!['policy','key'].includes(target.type)||requiredControlKeys.includes(store.controlKey('control/app')),'APP_CONTROL_BARRIER_REQUIRED',503);
- const revoke=['accountCutoff','credentialEpoch','parent','browser','localEpoch'].includes(target.type);
+ const revoke=['accountCutoff','credentialEpoch','parent','browser','localEpoch'].includes(target.type)||target.type==='key'&&target.purpose==='academy-shared-access';
  return [
   store.stmt('INSERT INTO jwt_v2_restrictions(restriction_id,target_json,scope_sub,digest,created_at) VALUES(?,?,?,?,?)',workId,targetJSON,scopeSub,hash,now),
   store.stmt("INSERT INTO jwt_v2_worksets(work_id,target_json,scope_sub,watermark,created_at,state) SELECT ?,?,?,COALESCE(MAX(ordinal),0),?,'PENDING' FROM jwt_v2_families",workId,targetJSON,scopeSub,now),
@@ -69,7 +73,10 @@ export async function markSessionCovered(store,{workId,sid,projection,controlKey
   if(projection.authorityReady!==false&&!foreign&&target.effect==='DENY'&&current?.[2]===target.revision)requireThat(target.deniedActions.every(a=>projection.deniedActions?.includes(a)),'DENIED_ACTION_NOT_ENFORCED',409);
  }
  if(target.type==='policy')requireThat(await verifiedPolicyCoverage(store,{target,projection,sid}),'POLICY_NOT_ENFORCED',409);
- if(target.type==='key')requireThat(projection.handoffRegistryRevision>=target.registryRevision&&projection.withdrawnHandoffKids?.includes(target.kid),'KEY_WITHDRAWAL_NOT_ENFORCED',409);
+ if(target.type==='key'){
+  requireThat(coversKeyWithdrawal(projection,target),'KEY_WITHDRAWAL_NOT_ENFORCED',409);
+  if(target.purpose==='academy-shared-access')requireThat(projection.localState==='REVOKED','RESTRICTION_NOT_ENFORCED',409);
+ }
  await store.stmt('UPDATE jwt_v2_publications SET published_cr=? WHERE work_id=? AND sid=?',projection.cr,workId,sid).run();
 }
 export async function worksetApplied(store,workId){
@@ -99,7 +106,7 @@ export async function markControlCovered(store,{workId,controlKey,projection}){
  const r=JSON.parse(life.receipt_json),target=JSON.parse(row.target_json);
  requireThat(r.digest===await digest(projection)&&r.nonce===projection.publicationNonce&&r.incarnation===projection.incarnation&&r.generation===projection.generation,'PUBLICATION_RECEIPT_MISMATCH',409);
  if(target.type==='policy')requireThat(await verifiedPolicyCoverage(store,{target,projection}),'APP_POLICY_NOT_ENFORCED',409);
- else if(target.type==='key')requireThat(projection.handoffRegistryRevision>=target.registryRevision&&projection.withdrawnHandoffKids?.includes(target.kid),'APP_KEY_NOT_WITHDRAWN',409);
+ else if(target.type==='key')requireThat(coversKeyWithdrawal(projection,target),'APP_KEY_NOT_WITHDRAWN',409);
  else requireThat(projection.authorityReady===false||projection.enforcedTargets?.some(t=>canonical(t)===canonical(target)),'CONTROL_TARGET_NOT_COVERED',409);
  await store.stmt('UPDATE jwt_v2_control_publications SET covered=1 WHERE work_id=? AND object_key=?',workId,controlKey).run();
 }
