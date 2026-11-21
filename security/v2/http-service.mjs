@@ -65,7 +65,7 @@ export async function serviceFetch(runtime,{targetApp,path,body,operationId}){
  const transport=binding?binding.fetch.bind(binding):globalThis.fetch;requireThat(typeof transport==='function','SERVICE_TRANSPORT_UNAVAILABLE',503);
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort('SERVICE_DEADLINE'),10000);
  let result,raw;
- try{result=await transport(new Request(ORIGINS[targetApp]+path,{method:'POST',headers,body:encoded,redirect:'error',signal:controller.signal}));requireThat(result instanceof Response&&!result.redirected&&result.ok,'SERVICE_REPLY_UNAVAILABLE',503);raw=await boundedBody(result);}
+ try{result=await transport(new Request(ORIGINS[targetApp]+path,{method:'POST',headers,body:encoded,redirect:'manual',signal:controller.signal}));requireThat(result instanceof Response&&!result.redirected&&result.ok,'SERVICE_REPLY_UNAVAILABLE',503);raw=await boundedBody(result);}
  catch(error){if(error?.code)throw error;throw Object.assign(new Error('SERVICE_TRANSPORT_UNAVAILABLE'),{code:'SERVICE_TRANSPORT_UNAVAILABLE',status:503});}
  finally{clearTimeout(timer);}
  if(path.endsWith('/reconcile')){

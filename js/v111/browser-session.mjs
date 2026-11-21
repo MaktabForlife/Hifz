@@ -71,7 +71,7 @@ export class BrowserSession{
  async #raw(path,body,{csrf=null,version=this.#generation,expected=this.#context,guard=true}={}){
   this.#guardWorker();
   const headers={'Content-Type':'application/json','X-UAA-Request':'2'};if(csrf)headers['X-UAA-CSRF']=csrf;if(expected)headers['X-UAA-Expected-Context']=contextHeader(expected);
-  let response;try{response=await this.#fetch(this.#url(path),{method:'POST',credentials:'include',mode:'same-origin',cache:'no-store',redirect:'error',referrerPolicy:'no-referrer',headers,body:JSON.stringify(body)});}catch(cause){throw new BrowserSessionError('AUTH_TRANSPORT_UNAVAILABLE',{cause});}
+  let response;try{response=await this.#fetch(this.#url(path),{method:'POST',credentials:'include',mode:'same-origin',cache:'no-store',redirect:'error',referrerPolicy:'same-origin',referrer:this.#origin+'/',headers,body:JSON.stringify(body)});}catch(cause){throw new BrowserSessionError('AUTH_TRANSPORT_UNAVAILABLE',{cause});}
   this.#guardWorker();if(guard)need(version===this.#generation&&same(expected,this.#context),'STALE_BROWSER_RESPONSE');
   need(!response.redirected,'AUTH_REDIRECT_REJECTED');let dto;try{dto=JSON.parse(await response.text());}catch{throw new BrowserSessionError('INVALID_AUTH_RESPONSE');}this.#authDTO(dto);
   this.#guardWorker();if(guard)need(version===this.#generation&&same(expected,this.#context),'STALE_BROWSER_RESPONSE');
