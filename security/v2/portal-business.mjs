@@ -54,7 +54,9 @@ export async function portalFetch(runtime,proof,operation,input){
  const headers={'Content-Type':'application/json','X-UAA-Portal-Key':entry.kid,'X-UAA-Portal-Time':String(now),'X-UAA-Portal-Nonce':nonce,'X-UAA-Portal-MAC':b64u(await hmac(entry.key,canonical(packet(false,entry.kid,now,nonce,await digest(body),route))))},peer=runtime.env.UAA_V2_PEERS?.[targetApp],transport=peer?.fetch?peer.fetch.bind(peer):globalThis.fetch;
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),Math.max(1,(expiresAt-now)*1000));
  try{
-  const response=await transport(new Request(ORIGINS[targetApp]+path,{method:'POST',headers,body:encoded,redirect:'error',signal:controller.signal})),value=await portalJSON(response,replyLimit(operation,input)),time=Number(response.headers.get('X-UAA-Portal-Time'));
+  const response=await transport(new Request(ORIGINS[targetApp]+path,{method:'POST',headers,body:encoded,redirect:'manual',signal:controller.signal}));
+  requireThat(response instanceof Response&&!response.redirected&&(response.status<300||response.status>=400),'PORTAL_REPLY_INVALID',503);
+  const value=await portalJSON(response,replyLimit(operation,input)),time=Number(response.headers.get('X-UAA-Portal-Time'));
   requireThat(response.headers.get('X-UAA-Portal-Key')===entry.kid&&response.headers.get('X-UAA-Portal-Nonce')===nonce&&safeInt(time)&&time<=runtime.clock()+5&&runtime.clock()<time+10,'PORTAL_REPLY_INVALID',503);
   requireThat(equal(unb64u(response.headers.get('X-UAA-Portal-MAC'),32),await hmac(entry.key,canonical(packet(true,entry.kid,time,nonce,await digest(value),route)))),'PORTAL_REPLY_INVALID',503);
   requireThat(response.ok&&value.success!==false,typeof value.code==='string'?value.code:'PORTAL_UNAVAILABLE',response.status>=500?503:response.status);return value;

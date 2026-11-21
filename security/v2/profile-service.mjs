@@ -47,7 +47,7 @@ export async function sendNativeProfile(runtime,packet,{fetcher=globalThis.fetch
  const peer=runtime.env.UAA_V2_PEERS?.hifz,transport=peer?.fetch?peer.fetch.bind(peer):fetcher;requireThat(typeof transport==='function','PROFILE_TRANSPORT_REQUIRED',503);
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
  try{
-  const response=await transport(new Request(ORIGINS.hifz+PROFILE_PATH,{method:'POST',headers:await profileHeaders(runtime,body),body,redirect:'error',signal:controller.signal}));
+  const response=await transport(new Request(ORIGINS.hifz+PROFILE_PATH,{method:'POST',headers:await profileHeaders(runtime,body),body,redirect:'manual',signal:controller.signal}));
   requireThat(response instanceof Response&&!response.redirected&&response.status===200,'PROFILE_DELIVERY_UNAVAILABLE',503);const raw=await readProfileBody(response,4096);await verifyProfileMAC(runtime,response.headers,raw,{reply:true});const reply=exact(strictJSON(raw),['schema','status','operationId','sub','dependency','commitRef','projectionDigest','nativeReceiptDigest']);
   requireThat(reply.schema===2&&reply.status==='COMMITTED'&&reply.operationId===packet.operationId&&reply.sub===packet.profile.academyUserId&&canonical(reply.dependency)===canonical(packet.dependency)&&reply.commitRef===packet.commitRef&&reply.projectionDigest===packet.projectionDigest&&/^[0-9a-f]{64}$/.test(reply.nativeReceiptDigest),'PROFILE_COMMIT_RECEIPT_CONFLICT',409);return reply;
  }finally{clearTimeout(timer);}

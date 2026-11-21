@@ -40,8 +40,8 @@ export async function nativeDomainCommand(runtime,cap,{command,input,operationId
  requireThat(typeof transport==='function','NATIVE_RPC_TRANSPORT_UNAVAILABLE',503);
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),Math.min(10000,(expiresAt-now)*1000));
  try{
-  const response=await transport(new Request(ORIGINS.academy+command,{method:'POST',headers,body:encoded,redirect:'error',signal:controller.signal}));
-  requireThat(response instanceof Response&&!response.redirected,'NATIVE_RPC_REPLY_UNAVAILABLE',503);
+  const response=await transport(new Request(ORIGINS.academy+command,{method:'POST',headers,body:encoded,redirect:'manual',signal:controller.signal}));
+  requireThat(response instanceof Response&&!response.redirected&&(response.status<300||response.status>=400),'NATIVE_RPC_REPLY_UNAVAILABLE',503);
   const result=await readReply(response);
   if(!response.ok){const code=typeof result.code==='string'&&/^[A-Z][A-Z0-9_]{0,80}$/.test(result.code)?result.code:'NATIVE_RPC_UNAVAILABLE';requireThat(false,code,response.status>=500?503:response.status);}
   runtime.assertCapability(cap);return result;
