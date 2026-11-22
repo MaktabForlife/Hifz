@@ -24,6 +24,13 @@ async function reconcile(runtime,{requestId,pageToken=null}){
   &&(pageToken===null||ascii(pageToken,4096)),'INVALID_OFFLINE_RECONCILIATION',400);
  const store=runtime.store;
  const saved=await store.first('SELECT request_json FROM jwt_v2_receive_requests WHERE request_id=?',requestId);
+ if(saved&&pageToken===null){
+  const received=await store.first('SELECT snapshot_id,status FROM jwt_v2_receive_snapshots WHERE request_id=?',requestId);
+  if(received&&['VERIFIED','APPLIED'].includes(received.status)){
+   const progress=await (await runtimeServices(runtime)).advanceReconcileSnapshot(requestId);
+   return {snapshotId:progress.snapshotId,nextPageToken:null,applied:progress.status==='APPLIED',continueApply:progress.status!=='APPLIED'};
+  }
+ }
  const stream='account-security';
  let body;
  if(saved){
@@ -43,7 +50,7 @@ async function reconcile(runtime,{requestId,pageToken=null}){
  const page=await serviceFetch(runtime,{targetApp:'academy',path:'/internal/auth/v2/reconcile',operationId:requestId,body});
  requireThat(page.schema===4&&uuid(page.snapshotId),'OFFLINE_BASELINE_SNAPSHOT_REQUIRED',503);
  const ready=await store.first("SELECT status FROM jwt_v2_receive_snapshots WHERE snapshot_id=?",page.snapshotId);
- return {snapshotId:page.snapshotId,nextPageToken:page.nextPageToken,applied:ready?.status==='APPLIED'};
+ return {snapshotId:page.snapshotId,nextPageToken:page.nextPageToken,applied:ready?.status==='APPLIED',continueApply:page.nextPageToken===null&&ready?.status==='VERIFIED'};
 }
 
 async function publishSharedRegistry(runtime,generation){

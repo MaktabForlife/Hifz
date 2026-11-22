@@ -271,17 +271,40 @@ class RuntimeServices{
    // published APPLIED facts advance existing contiguous coverage.
    await this.store.stmt("UPDATE jwt_v2_receive_requests SET status='COMPLETE' WHERE request_id=? AND status='PENDING'",request.requestId).run();return {mode:'EVENTS',automaticCoverage:false};
   }
-  requireThat(reply.mode==='SNAPSHOT','UNKNOWN_RECONCILE_MODE',409);await receiver.stage(raw,{now:this.runtime.clock()});
-  const verified=await receiver.verify(reply.snapshotId,{now:this.runtime.clock()});if(!verified.complete)return {mode:'SNAPSHOT',status:'STAGED',complete:false};
-  await receiver.applyRecords(reply.snapshotId,{now:this.runtime.clock(),planEffect:async({record,snapshotId,offset,metadata})=>{
+  requireThat(reply.mode==='SNAPSHOT','UNKNOWN_RECONCILE_MODE',409);
+  const staged=await receiver.stage(raw,{now:this.runtime.clock()});
+  // A signed source watermark can hold local admission while effects are
+  // pending. Only finishApplied may advance contiguous coverage.
+  await this.store.stmt(`UPDATE jwt_v2_event_streams SET highest_seen=max(highest_seen,?)
+   WHERE source_app='academy' AND target_app=? AND stream=? AND owner_epoch=?`,
+   reply.coveredThrough,this.runtime.app,reply.stream,reply.ownerEpoch).run();
+  return staged;
+ }
+ async advanceReconcileSnapshot(requestId){
+  requireThat(uuid(requestId)&&child(this.runtime.app),'INVALID_SNAPSHOT_CONTINUATION',409);
+  const [[pending],[capture]]=await this.store.readBatch([
+   ['SELECT * FROM jwt_v2_receive_requests WHERE request_id=?',requestId],
+   ['SELECT snapshot_id,status FROM jwt_v2_receive_snapshots WHERE request_id=?',requestId]
+  ]);
+  requireThat(pending&&['PENDING','COMPLETE'].includes(pending.status)&&capture&&['VERIFIED','APPLIED'].includes(capture.status),
+   'SNAPSHOT_CONTINUATION_REQUIRED',409);
+  const request=strictJSON(pending.request_json),receiver=this.receiver(request);
+  requireThat(pending.request_binding===requestBinding(request),'RECONCILE_REQUEST_CONFLICT',409);
+  const {snapshot_id:snapshotId}=capture;
+  if(capture.status==='APPLIED'){
+   await receiver.verify(snapshotId,{now:this.runtime.clock()});
+   return {mode:'SNAPSHOT',status:'APPLIED',publicationPending:false,snapshotId};
+  }
+  await receiver.applyRecords(snapshotId,{now:this.runtime.clock(),limit:2,planEffect:async({record,snapshotId,offset,metadata})=>{
    const workId=snapshotId+':'+offset;
    if(record.type==='accountBaseline')return sharedAccountBaselinePlan(this.store,{record,metadata,workId,now:this.runtime.clock()});
    const scoped=snapshotEffect(record);
    return {workId,statements:await this.effectPlan(workId,scoped.target,{sub:scoped.scopeSub})};
   }});
-  const effects=await this.store.all('SELECT work_id FROM jwt_v2_snapshot_effects WHERE snapshot_id=? ORDER BY record_offset',reply.snapshotId),budget={remaining:20};
-  for(const effect of effects){try{await this.publishWork(effect.work_id,{budget});}catch{/* Denials remain durable; incomplete publication never becomes APPLIED. */}}
-  return receiver.finishApplied(reply.snapshotId,{now:this.runtime.clock()});
+  const pendingEffect=await this.store.first(`SELECT e.work_id FROM jwt_v2_snapshot_effects e JOIN jwt_v2_worksets w USING(work_id)
+   WHERE e.snapshot_id=? AND w.state='PENDING' ORDER BY e.record_offset LIMIT 1`,snapshotId);
+  if(pendingEffect)await this.publishWork(pendingEffect.work_id,{budget:{remaining:1}});
+  return receiver.finishApplied(snapshotId,{now:this.runtime.clock()});
  }
  async publishPending({limit=20}={}){
   requireThat(safeInt(limit,1)&&limit<=20,'INVALID_PUBLICATION_PUMP',503);const works=await this.store.all("SELECT work_id FROM jwt_v2_worksets WHERE state='PENDING' ORDER BY created_at,work_id LIMIT ?",limit),budget={remaining:20};let applied=0;

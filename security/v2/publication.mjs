@@ -33,12 +33,19 @@ export async function restrictionPlan(store,{workId,target,now,requiredControlKe
  ];
 }
 export async function markSessionCovered(store,{workId,sid,projection,controlKey,now}){
- const work=await store.first('SELECT * FROM jwt_v2_worksets WHERE work_id=?',workId),f=await store.family(sid),row=await store.first('SELECT * FROM jwt_v2_publications WHERE work_id=? AND sid=?',workId,sid);
+ requireThat(controlKey===store.controlKey('security/session/'+sid),'WRONG_PUBLICATION_CONTROL_PURPOSE',409);
+ const [[work],[f],[row],[life]]=await store.readBatch([
+  ['SELECT * FROM jwt_v2_worksets WHERE work_id=?',workId],
+  ['SELECT * FROM jwt_v2_families WHERE sid=?',sid],
+  ['SELECT * FROM jwt_v2_publications WHERE work_id=? AND sid=?',workId,sid],
+  ['SELECT * FROM jwt_v2_objects WHERE object_key=?',controlKey]
+ ]);
  requireThat(work&&f&&row,'PUBLICATION_WORK_UNKNOWN',409);const target=JSON.parse(work.target_json);
  requireThat(!projection||canonical(projection.binding)===f.binding_json,'PUBLICATION_BINDING_CONFLICT',409);
- if(now>=f.s_exp){await store.stmt('UPDATE jwt_v2_publications SET covered_by_expiry=1 WHERE work_id=? AND sid=?',workId,sid).run();return;}
- requireThat(controlKey===store.controlKey('security/session/'+sid),'WRONG_PUBLICATION_CONTROL_PURPOSE',409);
- const life=await store.lifecycle(controlKey);
+ if(now>=f.s_exp){
+  await store.stmt('UPDATE jwt_v2_publications SET covered_by_expiry=1 WHERE work_id=? AND sid=? AND EXISTS(SELECT 1 FROM jwt_v2_families WHERE sid=? AND s_exp<=?)',workId,sid,sid,now).run();
+  return;
+ }
  requireThat(life?.state==='ACTIVE'&&life.receipt_json,'DURABLE_PUBLICATION_RECEIPT_REQUIRED',409);
  const receipt=JSON.parse(life.receipt_json);
  requireThat(receipt.digest===await digest(projection)&&receipt.nonce===projection.publicationNonce&&receipt.incarnation===projection.incarnation&&receipt.generation===projection.generation&&receipt.cr===projection.cr,'PUBLICATION_RECEIPT_MISMATCH',409);
@@ -77,14 +84,22 @@ export async function markSessionCovered(store,{workId,sid,projection,controlKey
   requireThat(coversKeyWithdrawal(projection,target),'KEY_WITHDRAWAL_NOT_ENFORCED',409);
   if(target.purpose==='academy-shared-access')requireThat(projection.localState==='REVOKED','RESTRICTION_NOT_ENFORCED',409);
  }
- await store.stmt('UPDATE jwt_v2_publications SET published_cr=? WHERE work_id=? AND sid=?',projection.cr,workId,sid).run();
+ const [guard,clear]=store.guard(`SELECT 1 FROM jwt_v2_publications p JOIN jwt_v2_worksets w USING(work_id)
+  JOIN jwt_v2_families f ON f.sid=p.sid JOIN jwt_v2_objects o ON o.object_key=?
+  WHERE p.work_id=? AND p.sid=? AND p.expected_cr=? AND w.target_json=? AND w.scope_sub IS ?
+   AND f.cr=? AND f.binding_json=? AND f.state=? AND f.authority_ready=? AND o.state='ACTIVE' AND o.receipt_json=?`,
+  [controlKey,workId,sid,row.expected_cr,work.target_json,work.scope_sub,f.cr,f.binding_json,f.state,f.authority_ready,life.receipt_json]);
+ await store.batch([guard,store.stmt('UPDATE jwt_v2_publications SET published_cr=? WHERE work_id=? AND sid=?',projection.cr,workId,sid),clear]);
 }
 export async function worksetApplied(store,workId){
- const row=await store.first('SELECT count(*) n FROM jwt_v2_publications WHERE work_id=? AND published_cr IS NULL AND covered_by_expiry=0',workId);
- const controls=await store.first('SELECT count(*) n FROM jwt_v2_control_publications WHERE work_id=? AND covered=0',workId);
- if(row.n||controls.n)return false;
- const work=await store.first('SELECT * FROM jwt_v2_worksets WHERE work_id=?',workId);requireThat(work,'PUBLICATION_WORK_UNKNOWN',409);
- await store.stmt("UPDATE jwt_v2_worksets SET state='APPLIED' WHERE work_id=?",workId).run();return true;
+ const statement=store.stmt(`UPDATE jwt_v2_worksets SET state='APPLIED' WHERE work_id=?
+  AND NOT EXISTS(SELECT 1 FROM jwt_v2_publications WHERE work_id=? AND published_cr IS NULL AND covered_by_expiry=0)
+  AND NOT EXISTS(SELECT 1 FROM jwt_v2_control_publications WHERE work_id=? AND covered=0)
+  RETURNING work_id`,workId,workId,workId);
+ const result=await statement.first();
+ if(result)return true;
+ requireThat(await store.first('SELECT 1 FROM jwt_v2_worksets WHERE work_id=?',workId),'PUBLICATION_WORK_UNKNOWN',409);
+ return false;
 }
 export function admissionFloorCondition(binding){
  // Every newly created/renewed SID is checked against durable restrictions, including after the workset watermark.

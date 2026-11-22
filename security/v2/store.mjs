@@ -11,6 +11,12 @@ export class PrimaryStore {
  // outlive one request, so authority reads must not reuse their old read session.
  first(sql,...args){return this.owningDB.withSession('first-primary').prepare(sql).bind(...args).first();}
  all(sql,...args){return this.owningDB.withSession('first-primary').prepare(sql).bind(...args).all().then(r=>r.results);}
+ async readBatch(queries){
+  const session=this.owningDB.withSession('first-primary');
+  const results=await session.batch(queries.map(([sql,...args])=>session.prepare(sql).bind(...args)));
+  requireThat(results.length===queries.length&&results.every(result=>result.success===true&&Array.isArray(result.results)),'PRIMARY_READ_BATCH_UNAVAILABLE',503);
+  return results.map(result=>result.results);
+ }
  batch(items){return this.db.batch(this.academyFence?[this.stmt("INSERT INTO jwt_v2_guards(id,accepted) SELECT 'native-split-fence',NOT EXISTS(SELECT 1 FROM split_write_fence) ON CONFLICT(id) DO UPDATE SET accepted=excluded.accepted"),...items,this.stmt("DELETE FROM jwt_v2_guards WHERE id='native-split-fence'")]:items);}
  guard(sql,args=[]){const id=crypto.randomUUID();return [this.stmt('INSERT INTO jwt_v2_guards(id,accepted) SELECT ?,EXISTS('+sql+')',id,...args),this.stmt('DELETE FROM jwt_v2_guards WHERE id=?',id)];}
  async claimSeed({key,incarnation,generation,nonce}){

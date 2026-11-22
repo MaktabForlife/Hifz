@@ -312,6 +312,13 @@ export class SnapshotReceiver {
   const count=await this.store.first('SELECT count(*) n FROM jwt_v2_receive_pages WHERE snapshot_id=?',snapshotId);
   if(count.n<meta.pageCount)return {status:'STAGED',complete:false,snapshotId};
   requireThat(count.n===meta.pageCount,'EXTRA_SNAPSHOT_PAGE',409);
+  if(capture.status==='VERIFIED'||capture.status==='APPLIED'){
+   // A verified header only follows the complete chained digest check. The
+   // stored pages and records are immutable. Keep request and expiry checks.
+   const staged=await this.store.first('SELECT count(*) n FROM jwt_v2_receive_records WHERE snapshot_id=?',snapshotId);
+   requireThat(staged.n===meta.totalRecords,'SNAPSHOT_COUNT_CONFLICT',409);
+   return {status:capture.status,complete:true,snapshotId,publicationPending:capture.status!=='APPLIED'};
+  }
   let previousDigest=await domainDigest(snapshotDomain(meta,'snapshot-start'),{metadata:meta,snapshotDigest:capture.snapshot_digest}),offset=0,previousRecord=null,previousEntries=null;
   const counts=Object.fromEntries(snapshotBuckets(meta.schema).map(b=>[b,0]));
   for(let index=0;index<meta.pageCount;index++){
@@ -320,33 +327,45 @@ export class SnapshotReceiver {
    requireThat(page.pageIndex===index&&page.recordOffset===offset&&page.previousPageDigest===previousDigest&&canonical(pick(page,META))===capture.metadata_json&&page.snapshotDigest===capture.snapshot_digest,'SNAPSHOT_CHAIN_OR_OFFSET',409);
    const unsigned=Object.fromEntries(Object.entries(page).filter(([k])=>k!=='pageDigest'));requireThat(page.pageDigest===await domainDigest(snapshotDomain(meta,'snapshot-page'),unsigned),'SNAPSHOT_PAGE_DIGEST',409);
    if(previousEntries&&previousEntries.length<20)requireThat(bytes(canonical([...previousEntries,page.entries[0]])).length>61440,'NON_GREEDY_SNAPSHOT_PARTITION',409);
+   const statements=[],clears=[];
    for(const entry of page.entries){
     const current={bucket:entry.bucket,json:canonical(entry.record)};
-    requireThat(ordered(previousRecord,current),'SNAPSHOT_RECORD_ORDER',409);previousRecord=current;counts[entry.bucket]++;
-    const old=await this.store.first('SELECT * FROM jwt_v2_receive_records WHERE snapshot_id=? AND record_offset=?',snapshotId,offset);
-    requireThat(!old||old.bucket===entry.bucket&&old.record_json===current.json,'SNAPSHOT_RECORD_CONFLICT',409);
-    if(!old){
-     try{await this.store.stmt('INSERT INTO jwt_v2_receive_records VALUES(?,?,?,?,?,?) ON CONFLICT(snapshot_id,record_offset) DO NOTHING',snapshotId,offset,entry.bucket,current.json,await digest(entry.record),semanticKey(entry.record)).run();
-      const stored=await this.store.first('SELECT * FROM jwt_v2_receive_records WHERE snapshot_id=? AND record_offset=?',snapshotId,offset);requireThat(stored.bucket===entry.bucket&&stored.record_json===current.json&&stored.semantic_key===semanticKey(entry.record),'SNAPSHOT_RECORD_CONFLICT',409);}
-     catch{reject('DUPLICATE_OR_CONFLICTING_SNAPSHOT_FACT',409);}
-    }
+    requireThat(ordered(previousRecord,current),'SNAPSHOT_RECORD_ORDER',409);
+    previousRecord=current;counts[entry.bucket]++;
+    const recordDigest=await digest(entry.record),key=semanticKey(entry.record);
+    const [guard,clear]=this.store.guard('SELECT 1 FROM jwt_v2_receive_records WHERE snapshot_id=? AND record_offset=? AND bucket=? AND record_json=? AND record_digest=? AND semantic_key=?',
+     [snapshotId,offset,entry.bucket,current.json,recordDigest,key]);
+    statements.push(this.store.stmt('INSERT INTO jwt_v2_receive_records VALUES(?,?,?,?,?,?) ON CONFLICT(snapshot_id,record_offset) DO NOTHING',
+     snapshotId,offset,entry.bucket,current.json,recordDigest,key),guard);
+    clears.push(clear);
     offset++;
+   }
+   if(statements.length){
+    try{await this.store.batch([...statements,...clears]);}
+    catch{reject('DUPLICATE_OR_CONFLICTING_SNAPSHOT_FACT',409);}
    }
    previousDigest=page.pageDigest;previousEntries=page.entries;
   }
   requireThat(offset===meta.totalRecords&&canonical(counts)===canonical(meta.bucketCounts),'SNAPSHOT_COUNT_CONFLICT',409);
-  const actual=await streamingSnapshotDigest(meta,b=>this.store.recordRows(snapshotId,b,{receiver:true}),{digestStreamFactory:this.digestStreamFactory});
+  const actual=await streamingSnapshotDigest(meta,b=>meta.bucketCounts[b]?this.store.recordRows(snapshotId,b,{receiver:true}):[],{digestStreamFactory:this.digestStreamFactory});
   requireThat(equal(actual,capture.snapshot_digest),'SNAPSHOT_FINAL_DIGEST',409);
   validateMetadata(meta,this.config,Math.max(now,this.clock()));
   await this.store.stmt("UPDATE jwt_v2_receive_snapshots SET status=CASE WHEN status='APPLIED' THEN status ELSE 'VERIFIED' END WHERE snapshot_id=?",snapshotId).run();
   return {status:capture.status==='APPLIED'?'APPLIED':'VERIFIED',complete:true,snapshotId,publicationPending:capture.status!=='APPLIED'};
  }
- async applyRecords(snapshotId,{now,planEffect}){
+ async applyRecords(snapshotId,{now,planEffect,limit=null}){
   const verified=await this.verify(snapshotId,{now});requireThat(verified.complete,'SNAPSHOT_INCOMPLETE',409);
   const capture=await this.store.first('SELECT metadata_json FROM jwt_v2_receive_snapshots WHERE snapshot_id=?',snapshotId),metadata=strictJSON(capture.metadata_json);
-  let offset=-1;
+  requireThat(limit===null||safeInt(limit,1)&&limit<=4,'INVALID_SNAPSHOT_EFFECT_LIMIT',503);
+  let offset=-1,processed=0;
   for(;;){
-   const rows=await this.store.all('SELECT * FROM jwt_v2_receive_records WHERE snapshot_id=? AND record_offset>? ORDER BY record_offset LIMIT 20',snapshotId,offset);if(!rows.length)break;
+   const rows=limit===null
+    ?await this.store.all('SELECT * FROM jwt_v2_receive_records WHERE snapshot_id=? AND record_offset>? ORDER BY record_offset LIMIT 20',snapshotId,offset)
+    :await this.store.all(`SELECT r.* FROM jwt_v2_receive_records r
+     WHERE r.snapshot_id=? AND NOT EXISTS(SELECT 1 FROM jwt_v2_snapshot_effects e
+      WHERE e.snapshot_id=r.snapshot_id AND e.record_offset=r.record_offset)
+     ORDER BY r.record_offset LIMIT ?`,snapshotId,limit);
+   if(!rows.length)break;
    for(const row of rows){
     offset=row.record_offset;const old=await this.store.first('SELECT e.*,w.target_json,w.scope_sub FROM jwt_v2_snapshot_effects e JOIN jwt_v2_worksets w ON w.work_id=e.work_id WHERE e.snapshot_id=? AND e.record_offset=?',snapshotId,offset);if(old){const scoped=snapshotEffect(strictJSON(row.record_json));requireThat(old.record_digest===row.record_digest&&old.target_json===canonical(scoped.target)&&(old.scope_sub??null)===scoped.scopeSub,'SNAPSHOT_APPLICATION_CONFLICT',409);continue;}
     validateMetadata(metadata,this.config,Math.max(now,this.clock()));
@@ -358,8 +377,11 @@ export class SnapshotReceiver {
      const [coverage,coverageClear]=this.store.guard('SELECT 1 FROM jwt_v2_worksets WHERE work_id=? AND target_json=? AND scope_sub IS ?',[effect.workId,canonical(expected.target),expected.scopeSub]);
     try{await this.store.batch([g,...effect.statements,coverage,this.store.stmt('INSERT INTO jwt_v2_snapshot_effects VALUES(?,?,?,?)',snapshotId,offset,row.record_digest,effect.workId),coverageClear,clear]);}
     catch(error){const raced=await this.store.first('SELECT e.*,w.target_json,w.scope_sub FROM jwt_v2_snapshot_effects e JOIN jwt_v2_worksets w ON w.work_id=e.work_id WHERE e.snapshot_id=? AND e.record_offset=?',snapshotId,offset);if(!raced)throw error;requireThat(raced.record_digest===row.record_digest&&raced.work_id===effect.workId&&raced.target_json===canonical(expected.target)&&(raced.scope_sub??null)===expected.scopeSub,'SNAPSHOT_APPLICATION_CONFLICT',409);}
+    processed++;
    }
+   if(limit!==null)break;
   }
+  if(limit!==null)return {snapshotId,processed};
   return this.finishApplied(snapshotId,{now});
  }
  async finishApplied(snapshotId,{now}){
