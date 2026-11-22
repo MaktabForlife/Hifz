@@ -34,3 +34,5 @@ export function sharedAccountBaselinePlan(store,{record,metadata,workId,now}){
   monotonicClear,clear
  ]};
 }
+
+export const readyAccountSQL="SELECT 1 FROM jwt_v2_shared_account_baselines b JOIN jwt_v2_accounts a ON a.sub=b.sub JOIN jwt_v2_receive_snapshots p ON p.snapshot_id=b.snapshot_id JOIN jwt_v2_shared_snapshot_heads h ON h.owner_epoch=b.owner_epoch AND h.snapshot_id=b.snapshot_id AND h.coverage=b.coverage JOIN jwt_v2_event_streams e ON e.source_app='academy' AND e.target_app=? AND e.stream='account-security' AND e.owner_epoch=b.owner_epoch WHERE b.owner_epoch=? AND b.sub=? AND b.ce=? AND b.ae=? AND a.ce=b.ce AND a.ae=b.ae AND a.active=1 AND p.status='APPLIED' AND json_extract(p.metadata_json,'$.ownerApp')='academy' AND json_extract(p.metadata_json,'$.recipientApp')=e.target_app AND json_extract(p.metadata_json,'$.ownerEpoch')=b.owner_epoch AND json_extract(p.metadata_json,'$.stream')=e.stream AND json_extract(p.metadata_json,'$.coveredThrough')=b.coverage AND e.contiguous_through>=b.coverage AND e.contiguous_through=e.highest_seen";

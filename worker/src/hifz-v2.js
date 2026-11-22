@@ -16,7 +16,7 @@ const sharedEntryMethods=new Map([
  ['/auth/v2/shared-entry/return.mjs',['GET']],
  ['/auth/v2/shared-entry-client.mjs',['GET']]
 ]);
-const internalAuth=new Set(['transactions','redeem','events','reconcile','incidents','logout'].map(p=>'/internal/auth/v2/'+p));
+const internalAuth=new Set(['transactions','redeem','events','reconcile','incidents','logout','account-baseline'].map(p=>'/internal/auth/v2/'+p));
 const identityWrites=new Set(['/admin/reset-pin','/admin/change-role','/admin/register-student','/admin/create-teaching-profile','/admin/update-user']);
 const fail=(code,status)=>new Response(JSON.stringify({error:code,code}),{status,headers:{'Content-Type':'application/json','Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'}});
 const noCors=response=>{const h=new Headers(response.headers);for(const k of [...h.keys()])if(k.toLowerCase().startsWith('access-control-'))h.delete(k);h.set('Cache-Control','private, no-store');h.set('Referrer-Policy','no-referrer');h.set('X-Content-Type-Options','nosniff');return new Response(response.body,{status:response.status,statusText:response.statusText,headers:h});};

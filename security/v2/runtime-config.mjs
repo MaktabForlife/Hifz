@@ -90,16 +90,32 @@ export async function loadRuntimeConfiguration(env,app){
  };
  const csrf=symmetric(csrfKeys),draft=symmetric(draftKeys);
  for(const c of csrfKeys.keys)for(const d of draftKeys.keys)requireThat(c.key!==d.key,'KEY_PURPOSE_SEPARATION_REQUIRED',503);
+ requireThat(raw.signInBaselineRefresh===undefined||typeof raw.signInBaselineRefresh==='boolean','V2_CONFIGURATION_MISMATCH',503);
+ if(raw.signInBaselineRefresh===true)requireThat(keyID(raw.signInBaselineGeneration)
+  &&(app==='academy'?sharedAcademySessions:Boolean(raw.sharedChildEntry&&sharedAcademy)),'BASELINE_GENERATION_REQUIRED',503);
  const service=parse(env.UAA_V2_SERVICE_KEYS_JSON,'SERVICE_KEYS_REQUIRED');
  requireThat(Array.isArray(service.keys)&&service.keys.length<=20,'SERVICE_KEY_REGISTRY_INVALID',503);
- const serviceKeys=new Map(),servicePaths=new Set(['transactions','redeem','events','reconcile','incidents','logout'].map(p=>'/internal/auth/v2/'+p));
+ const baselinePath='/internal/auth/v2/account-baseline';
+ const baselineService=env.UAA_V2_BASELINE_SERVICE_KEYS_JSON
+  ?parse(env.UAA_V2_BASELINE_SERVICE_KEYS_JSON,'BASELINE_SERVICE_KEYS_INVALID'):{keys:[]};
+ requireThat(Array.isArray(baselineService.keys)&&baselineService.keys.length<=4
+  &&baselineService.keys.every(entry=>Array.isArray(entry?.paths)&&entry.paths.length===1&&entry.paths[0]===baselinePath),
+  'BASELINE_SERVICE_KEYS_INVALID',503);
+ const serviceKeys=new Map(),servicePaths=new Set(['transactions','redeem','events','reconcile','incidents','logout','account-baseline'].map(p=>'/internal/auth/v2/'+p));
  const materials=new Map();
  const registerMaterial=(value,purpose)=>{unb64u(value,32);const prior=materials.get(value);requireThat(!prior||prior===purpose,'KEY_PURPOSE_SEPARATION_REQUIRED',503);materials.set(value,purpose);};
  for(const k of csrfKeys.keys)registerMaterial(k.key,'csrf');for(const k of draftKeys.keys)registerMaterial(k.key,'draft');
- for(const entry of service.keys){
-  requireThat(keyID(entry.kid)&&!serviceKeys.has(entry.kid)&&['academy','studio','hifz'].includes(entry.sourceApp)&&['academy','studio','hifz'].includes(entry.targetApp)&&entry.sourceApp!==entry.targetApp&&[entry.sourceApp,entry.targetApp].includes(app)&&[entry.sourceApp,entry.targetApp].includes('academy')&&Array.isArray(entry.paths)&&entry.paths.length>0&&new Set(entry.paths).size===entry.paths.length&&entry.paths.every(v=>servicePaths.has(v)&&(v.endsWith('/events')?entry.sourceApp==='academy':v.endsWith('/reconcile')||entry.targetApp==='academy')),'SERVICE_KEY_REGISTRY_INVALID',503);
+ const serviceEntries=[...service.keys,...baselineService.keys];
+ for(const entry of serviceEntries){
+  requireThat(keyID(entry.kid)&&!serviceKeys.has(entry.kid)&&['academy','studio','hifz'].includes(entry.sourceApp)&&['academy','studio','hifz'].includes(entry.targetApp)&&entry.sourceApp!==entry.targetApp&&[entry.sourceApp,entry.targetApp].includes(app)&&[entry.sourceApp,entry.targetApp].includes('academy')&&Array.isArray(entry.paths)&&entry.paths.length>0&&new Set(entry.paths).size===entry.paths.length&&entry.paths.every(v=>servicePaths.has(v)&&(v.endsWith('/events')?entry.sourceApp==='academy':v.endsWith('/reconcile')||v.endsWith('/account-baseline')||entry.targetApp==='academy')),'SERVICE_KEY_REGISTRY_INVALID',503);
   requireThat(![...csrfKeys.keys,...draftKeys.keys].some(k=>k.key===entry.key),'KEY_PURPOSE_SEPARATION_REQUIRED',503);
-  registerMaterial(entry.key,'service:'+entry.sourceApp+':'+entry.targetApp);serviceKeys.set(entry.kid,{...entry,key:unb64u(entry.key,32),env:raw.env});
+  registerMaterial(entry.key,(baselineService.keys.includes(entry)?'service-baseline:':'service:')+entry.sourceApp+':'+entry.targetApp);serviceKeys.set(entry.kid,{...entry,key:unb64u(entry.key,32),env:raw.env});
+ }
+ if(raw.signInBaselineRefresh===true){
+  const peers=app==='academy'?['studio','hifz']:['academy'];
+  const routes=[...serviceKeys.values()].filter(entry=>entry.paths.includes(baselinePath));
+  requireThat(peers.every(peer=>routes.some(entry=>entry.sourceApp===app&&entry.targetApp===peer)
+   &&routes.some(entry=>entry.sourceApp===peer&&entry.targetApp===app)),'BASELINE_SERVICE_KEYS_REQUIRED',503);
  }
  if(env.UAA_V2_LIBRARY_METADATA_KEY){requireThat(app==='academy','LIBRARY_METADATA_KEY_WRONG_OWNER',503);registerMaterial(env.UAA_V2_LIBRARY_METADATA_KEY,'academy-library-metadata');}
  if(env.UAA_V2_COORDINATOR_KEY){requireThat(app==='academy','COORDINATOR_KEY_WRONG_OWNER',503);registerMaterial(env.UAA_V2_COORDINATOR_KEY,'academy-coordinator');}
