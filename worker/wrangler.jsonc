@@ -12,9 +12,16 @@
   "main": "src/deployment.js",
   "compatibility_date": "2026-07-17",
 
+  "durable_objects": {
+    "bindings": [{ "name": "UAA_LOGOUT_DISPATCH", "class_name": "HifzLogoutDispatcher" }]
+  },
+  "migrations": [{ "tag": "v1111-logout-dispatch", "new_sqlite_classes": ["HifzLogoutDispatcher"] }],
   "env": {
     "production": {
       "name": "hifzhelper-api",
+      "durable_objects": {
+        "bindings": [{ "name": "UAA_LOGOUT_DISPATCH", "class_name": "HifzLogoutDispatcher" }]
+      },
       "vars": {
         "PROFILE_AUTHORITY": "academy",
         "ACADEMY_SYNC_TARGET": "production",
@@ -31,6 +38,9 @@
     },
     "development": {
       "name": "hifzhelper-api-dev",
+      "durable_objects": {
+        "bindings": [{ "name": "UAA_LOGOUT_DISPATCH", "class_name": "HifzLogoutDispatcher" }]
+      },
       "vars": {
         "PROFILE_AUTHORITY": "academy",
         "ACADEMY_SYNC_TARGET": "development",

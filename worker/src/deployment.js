@@ -2,6 +2,7 @@ import {WorkerEntrypoint} from 'cloudflare:workers';
 import {runtimeFor} from '../../security/v2/runtime.mjs';
 import {runOfflineUpdateStep} from '../../security/v2/offline-operations.mjs';
 
+export {HifzLogoutDispatcher} from '../../security/v2/child-logout-dispatch.mjs';
 export {default} from './index.js';
 
 export class V111OfflineUpdate extends WorkerEntrypoint {

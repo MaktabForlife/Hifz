@@ -47,37 +47,44 @@ export async function receiveAccountProof(runtime,peer,value,raw) {
  const control=await runtime.appControl();
  requireThat(control.sharedAcademyRegistryRevision===runtime.settings.sharedAcademy.revision,'CHILD_AUTHORITY_PENDING',503);
  const mapping=await runtime.native.mappingGuard(p);
- const floor=admissionFloorGuard(store,p);
- const guards=[
-  floor,
-  store.guard(mapping.sql,mapping.args),
-  store.guard(`SELECT 1 FROM (${streamSQL}) WHERE contiguous_through>=? AND contiguous_through=highest_seen`,[p.recipient,p.ownerEpoch,p.coverage]),
-  store.guard('SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM jwt_v2_signin_proof_receipts WHERE operation_id=? AND proof_digest<>?)',[p.operationId,proofDigest]),
-  store.guard(`SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM jwt_v2_signin_account_proofs WHERE ${keyWhere}
-   AND proof_digest<>? AND (coverage>? OR coverage=? AND ordinal>=? OR ce>? OR ce=? AND ae>?
-    OR ce=? AND ae=? AND json_extract(proof,'$.eligibilityRevision')>?))`,
-   [...key,proofDigest,p.coverage,p.coverage,p.ordinal,p.ce,p.ce,p.ae,p.ce,p.ae,p.eligibilityRevision]),
-  store.guard('SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM jwt_v2_accounts WHERE sub=? AND (active=0 OR ce>? OR ce=? AND ae>?))',[p.sub,p.ce,p.ce,p.ae])
- ];
- await store.batch([
-  ...guards.map(pair=>pair[0]),
-  store.stmt(`INSERT INTO jwt_v2_accounts(sub,ce,ae,le,active,revision) VALUES(?,?,?,0,1,1)
-   ON CONFLICT(sub) DO UPDATE SET ce=excluded.ce,ae=excluded.ae,revision=revision+1
-   WHERE ce<excluded.ce OR ce=excluded.ce AND ae<excluded.ae`,p.sub,p.ce,p.ae),
-  store.stmt(`INSERT INTO jwt_v2_signin_account_proofs VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
-   ON CONFLICT(env,recipient,generation,owner_epoch,sub) DO UPDATE SET
-   ce=excluded.ce,ae=excluded.ae,coverage=excluded.coverage,ordinal=excluded.ordinal,expires_at=excluded.expires_at,
-   proof_digest=excluded.proof_digest,proof=excluded.proof WHERE proof_digest<>excluded.proof_digest`,
-   ...key,p.ce,p.ae,p.coverage,p.ordinal,p.expiresAt,proofDigest,canonical(p)),
-  store.stmt('INSERT INTO jwt_v2_signin_proof_receipts VALUES(?,?) ON CONFLICT(operation_id) DO NOTHING',p.operationId,proofDigest),
-  ...guards.map(pair=>pair[1])
- ]);
  const gate=accountGate(runtime,mode,p),denial=admissionFloorCondition(p);
- const current=await store.first(`SELECT * FROM (${streamSQL})
+ const readCovered=()=>store.first(`SELECT * FROM (${streamSQL})
   WHERE contiguous_through=highest_seen AND contiguous_through>=?
    AND EXISTS(SELECT 1 FROM jwt_v2_signin_account_proofs WHERE ${keyWhere} AND proof_digest=? AND expires_at>unixepoch())
+   AND EXISTS(SELECT 1 FROM jwt_v2_signin_proof_receipts WHERE operation_id=? AND proof_digest=?)
    AND EXISTS(${gate.sql}) AND EXISTS(${denial.sql}) AND EXISTS(${mapping.sql})`,
-  p.recipient,p.ownerEpoch,p.coverage,...key,proofDigest,...gate.args,...denial.args,...mapping.args);
+  p.recipient,p.ownerEpoch,p.coverage,...key,proofDigest,p.operationId,proofDigest,...gate.args,...denial.args,...mapping.args);
+ // Reissue a lost reply only from the exact committed receipt and current
+ // coverage, eligibility, mapping and denial checks.
+ let current=await readCovered();
+ if(!current){
+  const floor=admissionFloorGuard(store,p);
+  const guards=[
+   floor,
+   store.guard(mapping.sql,mapping.args),
+   store.guard(`SELECT 1 FROM (${streamSQL}) WHERE contiguous_through>=? AND contiguous_through=highest_seen`,[p.recipient,p.ownerEpoch,p.coverage]),
+   store.guard('SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM jwt_v2_signin_proof_receipts WHERE operation_id=? AND proof_digest<>?)',[p.operationId,proofDigest]),
+   store.guard(`SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM jwt_v2_signin_account_proofs WHERE ${keyWhere}
+    AND proof_digest<>? AND (coverage>? OR coverage=? AND ordinal>=? OR ce>? OR ce=? AND ae>?
+     OR ce=? AND ae=? AND json_extract(proof,'$.eligibilityRevision')>?))`,
+    [...key,proofDigest,p.coverage,p.coverage,p.ordinal,p.ce,p.ce,p.ae,p.ce,p.ae,p.eligibilityRevision]),
+   store.guard('SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM jwt_v2_accounts WHERE sub=? AND (active=0 OR ce>? OR ce=? AND ae>?))',[p.sub,p.ce,p.ce,p.ae])
+  ];
+  await store.batch([
+   ...guards.map(pair=>pair[0]),
+   store.stmt(`INSERT INTO jwt_v2_accounts(sub,ce,ae,le,active,revision) VALUES(?,?,?,0,1,1)
+    ON CONFLICT(sub) DO UPDATE SET ce=excluded.ce,ae=excluded.ae,revision=revision+1
+    WHERE ce<excluded.ce OR ce=excluded.ce AND ae<excluded.ae`,p.sub,p.ce,p.ae),
+   store.stmt(`INSERT INTO jwt_v2_signin_account_proofs VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(env,recipient,generation,owner_epoch,sub) DO UPDATE SET
+    ce=excluded.ce,ae=excluded.ae,coverage=excluded.coverage,ordinal=excluded.ordinal,expires_at=excluded.expires_at,
+    proof_digest=excluded.proof_digest,proof=excluded.proof WHERE proof_digest<>excluded.proof_digest`,
+    ...key,p.ce,p.ae,p.coverage,p.ordinal,p.expiresAt,proofDigest,canonical(p)),
+   store.stmt('INSERT INTO jwt_v2_signin_proof_receipts VALUES(?,?) ON CONFLICT(operation_id) DO NOTHING',p.operationId,proofDigest),
+   ...guards.map(pair=>pair[1])
+  ]);
+  current=await readCovered();
+ }
  const after=await runtime.appControl();
  requireThat(current&&after.sharedAcademyRegistryRevision===runtime.settings.sharedAcademy.revision,
   'CHILD_AUTHORITY_PENDING',503);

@@ -1,3 +1,4 @@
+import {armLogoutDispatch} from './logout-dispatch.mjs';
 import {withdrawalFields} from './key-withdrawal.mjs';
 import {sharedAccountSelector,sharedAccountBaselinePlan} from './shared-account-baselines.mjs';
 import {senderFloorSchemaSQL} from './sender-floors.mjs';
@@ -195,6 +196,11 @@ class RuntimeServices{
    const localComplete=await this.continueAcceptedLogout(operationId);
    return {operationId,localComplete,canonicalAccepted:true,canonicalWorkId:operationId,globalConfirmed:false};
   }
+  return this.continueLocalLogout(operationId);
+ }
+
+ async continueLocalLogout(operationId){
+  requireThat(child(this.runtime.app)&&uuid(operationId),'INVALID_LOCAL_REPORT',400);
   const saved=await this.store.first("SELECT * FROM jwt_v2_service_outbox WHERE operation_id=? AND kind='logout'",operationId);
   requireThat(saved,'LOGOUT_WORK_UNKNOWN',409);
   const report=strictJSON(saved.report_json);
@@ -221,10 +227,14 @@ class RuntimeServices{
   const report={schema:2,env:this.runtime.config.env,sourceApp:this.runtime.app,targetApp:'academy',operationId,sub:binding.sub,psid:binding.psid,sid:binding.sid,bsid:binding.bsid,bv:binding.bv,ce:binding.ce,ae:binding.ae,kind:kind==='logout'?'VOLUNTARY_LOGOUT':incidentKind,evidenceRef:kind==='logout'?'local-logout-'+operationId:evidenceRef},hash=await digest(report);
   const old=await this.store.first('SELECT * FROM jwt_v2_service_outbox WHERE operation_id=?',operationId);requireThat(!old||old.request_digest===hash,'REPORT_OPERATION_CONFLICT',409);
   const workId='local-report-'+operationId;
+  const dispatch=kind==='logout'?await armLogoutDispatch(this.runtime,operationId):undefined;
   if(!old){
    requireThat(safeInt(binding.le+1),'LOCAL_EPOCH_EXHAUSTED',503);
    const target={type:'localEpoch',app:this.runtime.app,sub:binding.sub,ce:binding.ce,ae:binding.ae,maxLe:binding.le},effects=await restrictionPlan(this.store,{workId,target,now});
-   const [g,c]=this.store.guard('SELECT 1 FROM jwt_v2_families WHERE sid=? AND sub=? AND psid=? AND bsid=? AND bv=? AND ce=? AND ae=? AND le=? AND s_exp>?',[binding.sid,binding.sub,binding.psid,binding.bsid,binding.bv,binding.ce,binding.ae,binding.le,now]);
+   const owner="SELECT 1 FROM jwt_v2_families WHERE sid=? AND sub=? AND psid=? AND bsid=? AND bv=? AND ce=? AND ae=? AND le=? AND s_exp>?";
+   const args=[binding.sid,binding.sub,binding.psid,binding.bsid,binding.bv,binding.ce,binding.ae,binding.le,now];
+   const fence=" AND s_exp>unixepoch('now') AND unixepoch('now')<? AND EXISTS(SELECT 1 FROM (SELECT * FROM jwt_v2_update_boundaries ORDER BY generation DESC LIMIT 1) b WHERE b.generation=? AND b.release_id=? AND b.namespace=? AND b.status='VERIFIED')";
+   const [g,c]=dispatch?this.store.guard(owner+fence,[...args,dispatch.expiresAt,dispatch.generation,dispatch.releaseId,dispatch.namespace]):this.store.guard(owner,args);
    try{await this.store.batch([g,...effects,this.store.stmt('UPDATE jwt_v2_accounts SET le=max(le,?),revision=revision+1 WHERE sub=? AND ce=? AND ae=?',binding.le+1,binding.sub,binding.ce,binding.ae),this.store.stmt("INSERT INTO jwt_v2_service_outbox(operation_id,kind,report_json,request_digest,state) VALUES(?,?,?,?,'PENDING')",operationId,kind,canonical(report),hash),c]);}
    catch(e){const raced=await this.store.first('SELECT request_digest FROM jwt_v2_service_outbox WHERE operation_id=?',operationId);requireThat(raced?.request_digest===hash,'LOCAL_REPORT_CAPTURE_UNAVAILABLE',503);}
   }
