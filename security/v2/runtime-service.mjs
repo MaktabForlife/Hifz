@@ -3,7 +3,7 @@ import {sharedAccountSelector,sharedAccountBaselinePlan} from './shared-account-
 import {senderFloorSchemaSQL} from './sender-floors.mjs';
 import {bytes,canonical,strictJSON,exact,requireThat,ascii,safeInt,uuid,digest,unb64u,equal} from './codec.mjs';
 import {validateEvent,validateTarget,receiveBatch,BUCKETS} from './events.mjs';
-import {restrictionPlan,markSessionCovered,markControlCovered,worksetApplied} from './publication.mjs';
+import {restrictionPlan,markSessionCovered,markControlCovered,worksetApplied,isVoluntaryAccountCutoff,isLocalLogoutCutoff,markLogoutSessionCovered} from './publication.mjs';
 import {compactFloors} from './floors.mjs';
 import {SnapshotStore,SnapshotReceiver,validateReconcileRequest,requestBinding,buildSnapshot,serveSnapshotPage,encodeEventReplay,verifyEventReplay,persistEventReplay,compareUtf8,snapshotEffect} from './snapshot.mjs';
 import {nativeFence} from './capture.mjs';
@@ -17,6 +17,7 @@ export const runtimeServiceSchemaSQL=[
  "CREATE TABLE IF NOT EXISTS jwt_v2_service_outbox(operation_id TEXT PRIMARY KEY,kind TEXT NOT NULL CHECK(kind IN('logout','incidents')),report_json TEXT NOT NULL,request_digest TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN('PENDING','ACKNOWLEDGED')),attempts INTEGER NOT NULL DEFAULT 0,next_attempt_at INTEGER NOT NULL DEFAULT 0,result_json TEXT);",
  "CREATE TRIGGER IF NOT EXISTS jwt_v2_service_outbox_immutable BEFORE UPDATE ON jwt_v2_service_outbox WHEN OLD.operation_id<>NEW.operation_id OR OLD.kind<>NEW.kind OR OLD.report_json<>NEW.report_json OR OLD.request_digest<>NEW.request_digest OR NEW.attempts<OLD.attempts OR (OLD.state='ACKNOWLEDGED' AND NEW.state<>'ACKNOWLEDGED') OR (OLD.result_json IS NOT NULL AND OLD.result_json IS NOT NEW.result_json) BEGIN SELECT RAISE(ABORT,'service_outbox_immutable'); END;"
 ].join('\n')+'\n'+senderFloorSchemaSQL;
+export const logoutPublicationLimit=2;
 const instances=new WeakMap(),child=app=>app==='studio'||app==='hifz';
 const bucketFor={accountCutoff:'accountCutoffs',credentialEpoch:'credentialFloors',parent:'parentCutoffs',browser:'browserCutoffs',key:'keyWithdrawals',policy:'policies',dependency:'dependencyFloors'};
 const logical=projection=>Object.fromEntries(Object.entries(projection).filter(([key])=>!['schema','incarnation','generation','state','publicationNonce'].includes(key)));
@@ -52,7 +53,8 @@ class RuntimeServices{
  async eventOptions(peer){
   requireThat(peer.sourceApp==='academy'&&peer.targetApp===this.runtime.app&&child(this.runtime.app),'EVENT_DIRECTION_CONFLICT',403);
   const streams=new Map();for(const entry of this.registry.streams.filter(s=>s.targetApp===this.runtime.app)){await this.ledger(entry.targetApp,entry.stream,entry.ownerEpoch);if(!streams.has(entry.stream))streams.set(entry.stream,new Set());streams.get(entry.stream).add(entry.ownerEpoch);}
-  const budget={remaining:20};return {streams,dependencies:this.registry.dependencies,planEffect:e=>{if(e.target.type==='dependency'){const rule=this.registry.dependencies.get(e.target.id);requireThat(rule.scope==='GLOBAL'?e.sub===null:typeof e.sub==='string','EVENT_DEPENDENCY_SCOPE_CONFLICT',409);}return this.effectPlan(e.eventId,e.target,{sub:e.sub});},publishAndCovered:e=>this.publishWork(e.eventId,{budget})};
+  const budget={remaining:20},logoutBudget={remaining:logoutPublicationLimit};return {streams,dependencies:this.registry.dependencies,planEffect:e=>{if(e.target.type==='dependency'){const rule=this.registry.dependencies.get(e.target.id);requireThat(rule.scope==='GLOBAL'?e.sub===null:typeof e.sub==='string','EVENT_DEPENDENCY_SCOPE_CONFLICT',409);}return this.effectPlan(e.eventId,e.target,{sub:e.sub});},publishAndCovered:e=>this.publishWork(e.eventId,{
+   budget:e.target.type==='accountCutoff'&&e.target.reason==='VOLUNTARY_LOGOUT'?logoutBudget:budget})};
  }
  async policyPlan(target,now){
   validatePolicy(target);const epoch=await this.store.first('SELECT * FROM jwt_v2_policy_epochs WHERE owner_epoch=?',target.ownerEpoch);requireThat(epoch&&target.revision>=epoch.base_revision&&(epoch.sealed_through===null||target.revision<=epoch.sealed_through),'POLICY_EPOCH_RECONCILIATION_REQUIRED',409);
@@ -67,14 +69,28 @@ class RuntimeServices{
   const native=typeof this.runtime.native?.applySecurityFactPlan==='function'?await this.runtime.native.applySecurityFactPlan({target,scopeSub:sub}):[];requireThat(Array.isArray(native),'NATIVE_SECURITY_FACT_PLAN_REQUIRED',503);
    return [...native,...(target.type==='policy'?await this.policyPlan(target,now):[]),...await restrictionPlan(this.store,{workId,target,sub,now,requiredControlKeys})];
  }
- async publishWork(workId,{budget={remaining:20}}={}){
+ async publishWork(workId,{budget={remaining:20},firstSid=null,localLogout=false}={}){
   const work=await this.store.first('SELECT * FROM jwt_v2_worksets WHERE work_id=?',workId);requireThat(work,'PUBLICATION_WORK_UNKNOWN',409);const target=strictJSON(work.target_json);
   if(target.type==='policy')await this.finishPolicy(target);
   if(target.type==='key')await this.finishKey(target,workId);
   const controls=await this.store.all('SELECT * FROM jwt_v2_control_publications WHERE work_id=? AND covered=0',workId);
   for(const control of controls){requireThat(control.object_key===this.store.controlKey('control/app'),'UNKNOWN_SERVICE_CONTROL',503);const published=await this.runtime.cache.publish('control/app',async()=>strictJSON((await this.store.first('SELECT projection_json FROM jwt_v2_control_targets WHERE object_key=?',control.object_key)).projection_json));await markControlCovered(this.store,{workId,controlKey:control.object_key,projection:published});}
-  {const rows=budget.remaining>0?await this.store.all('SELECT sid FROM jwt_v2_publications WHERE work_id=? AND published_cr IS NULL AND covered_by_expiry=0 LIMIT ?',workId,Math.min(20,budget.remaining)):[];
-   for(const row of rows){budget.remaining--;let family=await this.store.family(row.sid);if(this.runtime.clock()>=family.s_exp){await markSessionCovered(this.store,{workId,sid:row.sid,now:this.runtime.clock()});continue;}
+  {const logout=isVoluntaryAccountCutoff(target)||localLogout&&isLocalLogoutCutoff(target,this.runtime.app,workId);
+   const pending=logout
+    ?"SELECT p.sid,f.s_exp FROM jwt_v2_publications p LEFT JOIN jwt_v2_families f USING(sid) WHERE p.work_id=? AND p.published_cr IS NULL AND p.covered_by_expiry=0"
+    :"SELECT sid FROM jwt_v2_publications WHERE work_id=? AND published_cr IS NULL AND covered_by_expiry=0";
+   const rows=budget.remaining>0?await this.store.all(
+    pending+(firstSid===null?'':' ORDER BY (sid IS ?) DESC,sid')+' LIMIT ?',
+    workId,...(firstSid===null?[]:[firstSid]),Math.min(20,budget.remaining)):[];
+   for(const row of rows){
+    budget.remaining--;
+    if(logout){
+     requireThat(safeInt(row.s_exp,1),'PUBLICATION_WORK_UNKNOWN',409);
+     const projection=this.runtime.clock()<row.s_exp?await this.runtime.publishFamily(row.sid):undefined;
+     await markLogoutSessionCovered(this.store,{workId,sid:row.sid,target,projection,now:this.runtime.clock(),localLogout});
+     continue;
+    }
+    let family=await this.store.family(row.sid);if(this.runtime.clock()>=family.s_exp){await markSessionCovered(this.store,{workId,sid:row.sid,now:this.runtime.clock()});continue;}
     if(target.type==='policy')await applyFamilyPolicy(this.store,{sid:row.sid,now:this.runtime.clock()});
     family=await this.store.family(row.sid);const saved=strictJSON(family.projection_json),next={...saved,enforcedTargets:compactFloors([...(saved.enforcedTargets||[]),target])};
     if(target.type==='key'){
@@ -128,7 +144,13 @@ class RuntimeServices{
   requireThat(this.runtime.app==='academy'&&child(peer.sourceApp)&&body.schema===2&&body.env===this.runtime.config.env&&body.sourceApp===peer.sourceApp&&body.targetApp==='academy'&&uuid(body.operationId)&&uuid(body.psid)&&uuid(body.sid)&&uuid(body.bsid)&&safeInt(body.bv,1)&&safeInt(body.ce,1)&&safeInt(body.ae,1)&&typeof body.sub==='string'&&bytes(body.sub).length>0&&bytes(body.sub).length<=180&&!/[\u0000-\u0020\u007f]/.test(body.sub)&&ascii(body.evidenceRef,128),'INVALID_CHILD_REPORT',400);
   requireThat(kind==='logout'?body.kind==='VOLUNTARY_LOGOUT':['VERIFIED_REFRESH_REUSE','CONFIRMED_KEY_COMPROMISE'].includes(body.kind),'REPORT_PURPOSE_CONFLICT',403);
   const hash=await digest(body),old=await this.store.first('SELECT * FROM jwt_v2_service_reports WHERE operation_id=?',body.operationId);
-  requireThat(!old||old.request_digest===hash,'REPORT_OPERATION_CONFLICT',409);if(old?.result_json)return strictJSON(old.result_json);
+  requireThat(!old||old.request_digest===hash,'REPORT_OPERATION_CONFLICT',409);
+  if(old?.result_json){
+   const result=strictJSON(old.result_json);
+   if(kind==='logout'&&result.status==='ACCEPTED')
+    await this.continueAcceptedLogout(result.receipt);
+   return result;
+  }
   const parent=await this.store.first('SELECT * FROM jwt_v2_parents WHERE psid=?',body.psid);
   requireThat(parent&&parent.sub===body.sub&&parent.bsid===body.bsid&&parent.bv===body.bv&&parent.ce===body.ce&&parent.ae===body.ae,'REPORT_PARENT_BINDING_CONFLICT',409);
   if(this.runtime.clock()>=parent.s_exp)return {schema:2,operationId:body.operationId,status:'RECONCILIATION_REQUIRED',cutoff:null,receipt:null};
@@ -140,8 +162,55 @@ class RuntimeServices{
   const nowKnown=await this.store.first('SELECT result_json FROM jwt_v2_service_reports WHERE operation_id=?',body.operationId);
   if(nowKnown.result_json){requireThat(nowKnown.result_json===canonical(result),'REPORT_RECEIPT_CONFLICT',409);return strictJSON(nowKnown.result_json);}
   await this.store.batch([g,this.store.stmt('UPDATE jwt_v2_service_reports SET result_json=? WHERE operation_id=?',canonical(result),body.operationId),c]);
-  if(accepted.status==='ACCEPTED')await this.publishWork(body.operationId).catch(()=>{});
+  if(accepted.status==='ACCEPTED'){
+   if(kind==='logout')await this.continueAcceptedLogout(accepted.receipt);
+   else await this.publishWork(body.operationId).catch(()=>{});
+  }
   return result;
+ }
+
+ async continueAcceptedLogout(operationId){
+  const row=await this.store.first(
+   "SELECT w.state FROM jwt_v2_worksets w JOIN jwt_v2_operations o ON o.operation_id=w.work_id WHERE w.work_id=? AND o.kind='VOLUNTARY_LOGOUT'",
+   operationId);
+  requireThat(row,'LOGOUT_WORK_UNKNOWN',409);
+  if(row.state==='APPLIED')return true;
+  return this.runtime.publishPending(operationId,{limit:logoutPublicationLimit});
+ }
+
+ async pendingLogout(limit=10){
+  requireThat(safeInt(limit,1)&&limit<=20&&this.runtime.env.UAA_V111_CUTOVER==='held','HELD_LOGOUT_REQUIRED',409);
+  if(this.runtime.app==='academy')
+   return this.store.all(
+    "SELECT o.operation_id FROM jwt_v2_worksets w JOIN jwt_v2_operations o ON o.operation_id=w.work_id WHERE w.state='PENDING' AND o.kind='VOLUNTARY_LOGOUT' ORDER BY w.created_at,w.work_id LIMIT ?",
+    limit);
+  return this.store.all(
+   "SELECT q.operation_id FROM jwt_v2_service_outbox q JOIN jwt_v2_worksets w ON w.work_id='local-report-'||q.operation_id WHERE q.kind='logout' AND (q.state='PENDING' OR w.state='PENDING') ORDER BY q.next_attempt_at,q.operation_id LIMIT ?",
+   limit);
+ }
+
+ async resumeLogout(operationId){
+  requireThat(uuid(operationId)&&this.runtime.env.UAA_V111_CUTOVER==='held','HELD_LOGOUT_REQUIRED',409);
+  if(this.runtime.app==='academy'){
+   const localComplete=await this.continueAcceptedLogout(operationId);
+   return {operationId,localComplete,canonicalAccepted:true,canonicalWorkId:operationId,globalConfirmed:false};
+  }
+  const saved=await this.store.first("SELECT * FROM jwt_v2_service_outbox WHERE operation_id=? AND kind='logout'",operationId);
+  requireThat(saved,'LOGOUT_WORK_UNKNOWN',409);
+  const report=strictJSON(saved.report_json);
+  requireThat(report.operationId===operationId&&report.sourceApp===this.runtime.app
+   &&report.targetApp==='academy'&&report.kind==='VOLUNTARY_LOGOUT'
+   &&saved.request_digest===await digest(report),'LOGOUT_WORK_BINDING_CHANGED',409);
+  const workId='local-report-'+operationId;
+  const work=await this.store.first('SELECT state FROM jwt_v2_worksets WHERE work_id=?',workId);
+  requireThat(work,'LOGOUT_WORK_UNKNOWN',409);
+  const localComplete=work.state==='APPLIED'||await this.publishWork(workId,
+   {budget:{remaining:logoutPublicationLimit},firstSid:report.sid,localLogout:true});
+  if(saved.state!=='ACKNOWLEDGED')await this.deliverReports({limit:1,operationId});
+  const current=await this.store.first('SELECT state,result_json FROM jwt_v2_service_outbox WHERE operation_id=?',operationId);
+  const canonicalAccepted=current.state==='ACKNOWLEDGED';
+  return {operationId,localComplete,canonicalAccepted,
+   canonicalWorkId:canonicalAccepted?strictJSON(current.result_json).receipt:null,globalConfirmed:false};
  }
 
  async queueReport({binding,kind,operationId,now=this.runtime.clock(),incidentKind,evidenceRef}){
@@ -159,7 +228,13 @@ class RuntimeServices{
    try{await this.store.batch([g,...effects,this.store.stmt('UPDATE jwt_v2_accounts SET le=max(le,?),revision=revision+1 WHERE sub=? AND ce=? AND ae=?',binding.le+1,binding.sub,binding.ce,binding.ae),this.store.stmt("INSERT INTO jwt_v2_service_outbox(operation_id,kind,report_json,request_digest,state) VALUES(?,?,?,?,'PENDING')",operationId,kind,canonical(report),hash),c]);}
    catch(e){const raced=await this.store.first('SELECT request_digest FROM jwt_v2_service_outbox WHERE operation_id=?',operationId);requireThat(raced?.request_digest===hash,'LOCAL_REPORT_CAPTURE_UNAVAILABLE',503);}
   }
-  await this.publishWork(workId).catch(()=>{});
+  if(kind==='logout'){
+   await this.publishWork(workId,{budget:{remaining:logoutPublicationLimit},firstSid:binding.sid,localLogout:true});
+   const holder=await this.store.first(
+    'SELECT 1 FROM jwt_v2_publications WHERE work_id=? AND sid=? AND (published_cr IS NOT NULL OR covered_by_expiry=1)',
+    workId,binding.sid);
+   requireThat(holder,'LOCAL_LOGOUT_PUBLICATION_PENDING',503);
+  }else await this.publishWork(workId).catch(()=>{});
   await this.deliverReports({limit:1,operationId,now}).catch(()=>{});
   const current=await this.store.first('SELECT * FROM jwt_v2_service_outbox WHERE operation_id=?',operationId),receipt=current.result_json&&strictJSON(current.result_json);
   return {operationId,outcome:current.state==='ACKNOWLEDGED'?'ACCEPTED_PENDING':'GLOBAL_UNCONFIRMED',canonicalAccepted:current.state==='ACKNOWLEDGED',globalConfirmed:false,receipt:receipt??null};
@@ -182,7 +257,7 @@ class RuntimeServices{
  streamMap(targetApp){const result=new Map();for(const s of this.registry.streams.filter(s=>s.targetApp===targetApp)){if(!result.has(s.stream))result.set(s.stream,new Set());result.get(s.stream).add(s.ownerEpoch);}return result;}
  async reconcileOwner(request,peer){
   requireThat(this.runtime.app==='academy'&&peer.sourceApp===request.recipientApp,'RECONCILE_DIRECTION_CONFLICT',403);
-  const config={env:this.runtime.config.env,recipientApp:peer.sourceApp,snapshotSchema:this.runtime.settings.raw.snapshotSchema};validateReconcileRequest(request,config);
+  const config={env:this.runtime.config.env,recipientApp:peer.sourceApp,snapshotSchema:this.runtime.settings.raw.snapshotSchema,snapshotBuildSteps:this.runtime.settings.raw.snapshotBuildSteps===true};validateReconcileRequest(request,config);
   const existing=await this.store.first('SELECT * FROM jwt_v2_replay_captures WHERE request_id=?',request.requestId);
   const streams=this.streamMap(peer.sourceApp);
   if(existing){requireThat(existing.request_binding===requestBinding(request),'RECONCILE_REQUEST_CONFLICT',409);await verifyEventReplay({raw:existing.reply_json,request,config,streams,dependencies:this.registry.dependencies});return existing.reply_json;}
@@ -238,7 +313,7 @@ class RuntimeServices{
  }
 
  receiver(request){
-  const config={env:this.runtime.config.env,recipientApp:this.runtime.app,snapshotSchema:this.runtime.settings.raw.snapshotSchema};validateReconcileRequest(request,config);
+  const config={env:this.runtime.config.env,recipientApp:this.runtime.app,snapshotSchema:this.runtime.settings.raw.snapshotSchema,snapshotBuildSteps:this.runtime.settings.raw.snapshotBuildSteps===true};validateReconcileRequest(request,config);
   requireThat(child(this.runtime.app)&&request.recipientApp===this.runtime.app,'RECONCILE_DIRECTION_CONFLICT',403);
   const entries=this.registry.streams.filter(s=>s.targetApp===this.runtime.app&&s.stream===request.stream),genesis=entries.filter(s=>s.genesis);
   requireThat(genesis.length===1&&(request.ownerEpoch===null||entries.some(s=>s.ownerEpoch===request.ownerEpoch)),'RECONCILE_EPOCH_NOT_CONFIGURED',409);
@@ -263,7 +338,13 @@ class RuntimeServices{
   requireThat(peer.sourceApp==='academy'&&peer.targetApp===this.runtime.app,'RECONCILE_REPLY_OWNER_CONFLICT',401);
   const receiver=this.receiver(request),pending=await this.store.first('SELECT * FROM jwt_v2_receive_requests WHERE request_id=?',request.requestId);
   requireThat(pending&&pending.request_binding===requestBinding(request)&&['PENDING','COMPLETE'].includes(pending.status),'UNREQUESTED_RECONCILIATION_REPLY',409);
-  const reply=strictJSON(raw),options=await this.eventOptions(peer);
+  const reply=strictJSON(raw);
+  if(reply.mode==='BUILD_PENDING'){
+   requireThat(this.runtime.env.UAA_V111_CUTOVER==='held','SNAPSHOT_BUILD_HOLD_REQUIRED',503);
+   await receiver.stageBuildProgress(request,reply,{now:this.runtime.clock()});
+   return {mode:'BUILD_PENDING'};
+  }
+  const options=await this.eventOptions(peer);
   if(reply.mode==='EVENTS'){
    const verified=await verifyEventReplay({raw,request,config:receiver.config,streams:options.streams,dependencies:this.registry.dependencies});
    if(verified.events.length){const batch={schema:2,env:this.runtime.config.env,sourceApp:'academy',targetApp:this.runtime.app,batchId:request.requestId,events:verified.events};await receiveBatch({body:canonical(batch),config:this.runtime.config,store:this.store,...options});}
@@ -272,13 +353,9 @@ class RuntimeServices{
    await this.store.stmt("UPDATE jwt_v2_receive_requests SET status='COMPLETE' WHERE request_id=? AND status='PENDING'",request.requestId).run();return {mode:'EVENTS',automaticCoverage:false};
   }
   requireThat(reply.mode==='SNAPSHOT','UNKNOWN_RECONCILE_MODE',409);
-  const staged=await receiver.stage(raw,{now:this.runtime.clock()});
-  // A signed source watermark can hold local admission while effects are
-  // pending. Only finishApplied may advance contiguous coverage.
-  await this.store.stmt(`UPDATE jwt_v2_event_streams SET highest_seen=max(highest_seen,?)
-   WHERE source_app='academy' AND target_app=? AND stream=? AND owner_epoch=?`,
-   reply.coveredThrough,this.runtime.app,reply.stream,reply.ownerEpoch).run();
-  return staged;
+  // Record the authenticated watermark in the same transaction as its page.
+  // Only finishApplied may advance contiguous coverage.
+  return receiver.stage(raw,{now:this.runtime.clock(),observeWatermark:true});
  }
  async advanceReconcileSnapshot(requestId){
   requireThat(uuid(requestId)&&child(this.runtime.app),'INVALID_SNAPSHOT_CONTINUATION',409);

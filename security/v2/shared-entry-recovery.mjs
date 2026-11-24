@@ -11,8 +11,10 @@ export function hasSharedPredecessor(store,claims){
 
 export async function sharedPredecessor(runtime,claims){
  const store=runtime.store,exactParent=[claims.psid,claims.bsid,claims.bv,claims.sub];
- const prior=await store.first(currentFamilySQL,...exactParent);
- const priorBarrier=await store.first(barrierSQL,...exactParent);
+ const [[prior],[priorBarrier]]=await store.readBatch([
+  [currentFamilySQL,...exactParent],
+  [barrierSQL,...exactParent]
+ ]);
  if(!prior){
   requireThat(!priorBarrier,'SHARED_ENTRY_RECOVERY_REQUIRED',409);
   const guards=[

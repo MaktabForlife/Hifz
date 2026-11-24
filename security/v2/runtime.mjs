@@ -161,8 +161,9 @@ export class AppRuntime {
   const now=this.clock(),context=selector(parseBinding(family),this.app),terminal=['REVOKED','EXPIRED'].includes(family.state)||now>=family.s_exp;
   if(terminal)return {contractVersion:2,success:false,state:'ENDED',serverNowMs:now*1000,context:null};
   const state=family.state==='ADMITTED_LOCKED'?'ADMITTED_LOCKED':now>=family.idle_until||family.state!=='UNLOCKED'?'LOCKED':'UNLOCKED';
-  const auth=await this.intents.issue(family,purpose);
-  const business=state==='UNLOCKED'&&now<Math.min(family.deadline,family.idle_until,family.s_exp)?await this.intents.issue(family,'business'):null;
+  const canIssueBusiness=state==='UNLOCKED'&&now<Math.min(family.deadline,family.idle_until,family.s_exp);
+  const [auth,additional]=await this.intents.issueMany(family,canIssueBusiness&&purpose!=='business'?[purpose,'business']:[purpose]);
+  const business=canIssueBusiness?(purpose==='business'?auth:additional):null;
   return {contractVersion:2,success:true,serverNowMs:now*1000,state,authorityReady:Boolean(family.authority_ready),replacementRequired:state==='UNLOCKED'&&!family.authority_ready,context,expectedContext:context,env:this.config.env,draftGeneration:1,originalExpiresAtMs:family.s_exp*1000,idleUntilMs:family.idle_until*1000,validatedAtMs:family.vat*1000,validationDeadlineMs:family.deadline*1000,...auth,...(business?{csrfByPurpose:{business:business.csrf},businessIntent:business.intent}: {})};
  }
  async cookieResponse(family,refresh,value){

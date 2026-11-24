@@ -1,3 +1,4 @@
+import {buildPhases,steppedBuildProtocol,retireReceivedSnapshot} from './snapshot.mjs';
 import {registryControlPlan,sourceControlPlan} from './control-publication.mjs';
 import {ascii,requireThat,safeInt,strictJSON,uuid} from './codec.mjs';
 import {serviceFetch} from './http-service.mjs';
@@ -24,9 +25,15 @@ async function reconcile(runtime,{requestId,pageToken=null}){
   &&(pageToken===null||ascii(pageToken,4096)),'INVALID_OFFLINE_RECONCILIATION',400);
  const store=runtime.store;
  const saved=await store.first('SELECT request_json FROM jwt_v2_receive_requests WHERE request_id=?',requestId);
- if(saved&&pageToken===null){
-  const received=await store.first('SELECT snapshot_id,status FROM jwt_v2_receive_snapshots WHERE request_id=?',requestId);
-  if(received&&['VERIFIED','APPLIED'].includes(received.status)){
+ const previous=saved?strictJSON(saved.request_json):null;
+ const selected=runtime.settings.raw.snapshotBuildSteps===true;
+ if(previous){
+  const stepped=previous.buildProtocol===steppedBuildProtocol;
+  const received=pageToken===null||stepped!==selected
+   ?await store.first('SELECT snapshot_id,status FROM jwt_v2_receive_snapshots WHERE request_id=?',requestId):null;
+  // A complete signed legacy capture stays usable by the same request.
+  requireThat(stepped===selected||!stepped&&received,'SNAPSHOT_BUILD_PROFILE_CHANGED',409);
+  if(received&&pageToken===null&&['VERIFIED','APPLIED'].includes(received.status)){
    const progress=await (await runtimeServices(runtime)).advanceReconcileSnapshot(requestId);
    return {snapshotId:progress.snapshotId,nextPageToken:null,applied:progress.status==='APPLIED',continueApply:progress.status!=='APPLIED'};
   }
@@ -34,7 +41,7 @@ async function reconcile(runtime,{requestId,pageToken=null}){
  const stream='account-security';
  let body;
  if(saved){
-  body={...strictJSON(saved.request_json),pageToken};
+  body={...previous,pageToken};
  }else{
   requireThat(pageToken===null,'UNKNOWN_SNAPSHOT_CONTINUATION',409);
   const streams=(await runtimeServices(runtime)).registry.streams.filter(entry=>
@@ -45,9 +52,18 @@ async function reconcile(runtime,{requestId,pageToken=null}){
    'academy',runtime.app,stream,ownerEpoch);
   requireThat(current,'OFFLINE_RECONCILIATION_GENESIS_REQUIRED',503);
   body={schema:2,env:runtime.config.env,sourceApp:runtime.app,targetApp:'academy',requestId,ownerApp:'academy',
-   recipientApp:runtime.app,stream,ownerEpoch,contiguousThrough:current.contiguous_through,missingRanges:[],knownFloorsDigest:null,pageToken};
+   recipientApp:runtime.app,stream,ownerEpoch,contiguousThrough:current.contiguous_through,missingRanges:[],knownFloorsDigest:null,pageToken,
+   ...(selected?{buildProtocol:steppedBuildProtocol}:{})};
  }
  const page=await serviceFetch(runtime,{targetApp:'academy',path:'/internal/auth/v2/reconcile',operationId:requestId,body});
+ if(page.mode==='BUILD_PENDING'){
+  const receipt=await store.first('SELECT base_json,phase,cursor FROM jwt_v2_snapshot_build_receipts WHERE request_id=?',requestId);
+  requireThat(receipt,'SNAPSHOT_BUILD_RECEIPT_REQUIRED',503);
+  const blocked=receipt.phase===5;
+  return {snapshotId:strictJSON(receipt.base_json).snapshotId,nextPageToken:null,applied:false,
+   continueApply:false,continueBuild:!blocked,buildPhase:buildPhases[receipt.phase],buildCursor:receipt.cursor,
+   ...(blocked?{code:'SNAPSHOT_BUILD_ENVELOPE_EXCEEDED'}:{})};
+ }
  requireThat(page.schema===4&&uuid(page.snapshotId),'OFFLINE_BASELINE_SNAPSHOT_REQUIRED',503);
  const ready=await store.first("SELECT status FROM jwt_v2_receive_snapshots WHERE snapshot_id=?",page.snapshotId);
  return {snapshotId:page.snapshotId,nextPageToken:page.nextPageToken,applied:ready?.status==='APPLIED',continueApply:page.nextPageToken===null&&ready?.status==='VERIFIED'};
@@ -91,6 +107,14 @@ export async function runOfflineUpdateStep(runtime,command){
   case 'publishSharedRegistry':return publishSharedRegistry(runtime,generation);
   case 'prepare':return prepareUpdateBoundary(runtime,pinned);
   case 'inventory':return listUpdateSubjects(runtime,{generation,after:command.after,limit:command.limit});
+  case 'pendingLogout':{
+   await requireVerifiedUpdateBoundary(runtime);
+   return (await runtimeServices(runtime)).pendingLogout(command.limit);
+  }
+  case 'resumeLogout':{
+   await requireVerifiedUpdateBoundary(runtime);
+   return (await runtimeServices(runtime)).resumeLogout(command.operationId);
+  }
   case 'revokeAccount':{
    requireThat(ascii(command.subject,180),'OFFLINE_UPDATE_ACCOUNT_UNAVAILABLE',400);
    const {status,receipt}=await revokeOfflineAcademyAccount(runtime,{generation,sub:command.subject});
@@ -99,6 +123,7 @@ export async function runOfflineUpdateStep(runtime,command){
   case 'publishSessions':return publishUpdateSessions(runtime,{generation,limit:command.limit});
   case 'deliverCutoffs':return deliver(runtime,command.limit);
   case 'reconcileBaselines':return reconcile(runtime,command);
+  case 'retireReconcileBuild':return retireReceivedSnapshot(runtime,command.requestId);
   case 'verifyRevocations':return verifyUpdateBoundary(runtime,generation);
   default:requireThat(false,'INVALID_OFFLINE_UPDATE_ACTION',400);
  }

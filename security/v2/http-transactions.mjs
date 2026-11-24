@@ -4,14 +4,16 @@ import {expectedContext,requireExpected} from './http-context.mjs';
 const kinds=new Set(['pin','pin/setup','admission/start','admission/finalize','unlock/start','unlock/finalize','admission/proceed','browser-clear','shared-entry']);
 export class HTTPTransactions {
  constructor(runtime){this.runtime=runtime;this.store=runtime.store;this.clock=runtime.clock;}
- async create({kind,sub=null,expected=null,payload={},tx=crypto.randomUUID(),operationId=crypto.randomUUID(),expiresAt=this.clock()+300}){
+ async create({kind,sub=null,expected=null,payload={},tx:suppliedTx,operationId=crypto.randomUUID(),expiresAt=this.clock()+300}){
+  const tx=suppliedTx===undefined?crypto.randomUUID():suppliedTx;
   requireThat(kinds.has(kind)&&uuid(tx)&&uuid(operationId)&&expiresAt>this.clock()&&expiresAt<=this.clock()+300,'INVALID_BROWSER_TRANSACTION',400);
   const updateGeneration=this.runtime.settings.raw.offlineUpdate?.generation;
   if(updateGeneration!==undefined)payload={...payload,updateGeneration};
-  const old=await this.get(tx);
+  const old=suppliedTx===undefined?null:await this.get(tx);
   if(old){requireThat(old.kind===kind&&old.sub===sub&&old.expected_json===(expected===null?null:canonical(expected))&&old.operation_id===operationId&&old.payload_json===canonical(payload),'TRANSACTION_CONFLICT',409);return old;}
-  await this.store.stmt("INSERT INTO jwt_v2_http_transactions VALUES(?,?,?,?,?,?,?,?,?,'PENDING',?,NULL)",tx,kind,sub,expected===null?null:canonical(expected),operationId,this.runtime.settings.csrf.currentKid,expiresAt,this.clock(),expiresAt,canonical(payload)).run();
-  return this.get(tx);
+  const row=await this.store.stmt("INSERT INTO jwt_v2_http_transactions VALUES(?,?,?,?,?,?,?,?,?,'PENDING',?,NULL) RETURNING *",tx,kind,sub,expected===null?null:canonical(expected),operationId,this.runtime.settings.csrf.currentKid,expiresAt,this.clock(),expiresAt,canonical(payload)).first();
+  requireThat(row?.tx===tx&&row.operation_id===operationId,'BROWSER_TRANSACTION_UNAVAILABLE',503);
+  return row;
  }
  get(tx){requireThat(uuid(tx),'INVALID_BROWSER_TRANSACTION',400);return this.store.first('SELECT * FROM jwt_v2_http_transactions WHERE tx=?',tx);}
  async proof(row){

@@ -9,6 +9,84 @@ const TYPES={accountBaselines:'accountBaseline',accountCutoffs:'accountCutoff',c
 const FIELDS={accountBaseline:'type sub ce ae',accountCutoff:'type sub maxCe maxAe reason incidentId',credentialEpoch:'type sub newCe reason',parent:'type sub psid bsid bv ce ae',browser:'type bsid maxBv',key:'type purpose kid registryRevision',policy:'type policyId ownerEpoch revision inactivityMinutes',dependency:'type id ownerEpoch revision effect deniedActions'};
 const HEX=/^[0-9a-f]{64}$/;
 const q=()=>crypto.randomUUID();
+export const snapshotBuildLimits=Object.freeze({records:180, history:800, epochs:4, pages:10,
+ bytes:524288, digestReads:16, digestMs:5000});
+export const steppedBuildProtocol='stepped-v1';
+export const buildPhases=Object.freeze(['HISTORY','NORMALISING','ASSEMBLING','DIGEST','SIGNING','BLOCKED']);
+export const receiveBuildSchemaSQL=`CREATE TABLE IF NOT EXISTS jwt_v2_snapshot_build_receipts(
+ request_id TEXT PRIMARY KEY REFERENCES jwt_v2_receive_requests(request_id),
+ base_json TEXT NOT NULL,request_digest TEXT NOT NULL,
+ phase INTEGER NOT NULL CHECK(phase BETWEEN 0 AND 5),
+ cursor INTEGER NOT NULL CHECK(cursor>=0)
+);
+CREATE TRIGGER IF NOT EXISTS jwt_v2_snapshot_build_receipt_monotonic
+BEFORE UPDATE ON jwt_v2_snapshot_build_receipts
+WHEN OLD.request_id<>NEW.request_id OR OLD.base_json<>NEW.base_json OR OLD.request_digest<>NEW.request_digest
+ OR OLD.phase>NEW.phase OR (OLD.phase=NEW.phase AND OLD.cursor>NEW.cursor)
+BEGIN SELECT RAISE(ABORT,'snapshot_build_receipt_immutable'); END;
+CREATE TABLE IF NOT EXISTS jwt_v2_snapshot_receive_slots(
+ request_id TEXT PRIMARY KEY REFERENCES jwt_v2_receive_requests(request_id),
+ snapshot_id TEXT NOT NULL UNIQUE REFERENCES jwt_v2_receive_snapshots(snapshot_id),
+ stream TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS jwt_v2_snapshot_receive_slots_by_stream
+ ON jwt_v2_snapshot_receive_slots(stream);
+CREATE TABLE IF NOT EXISTS jwt_v2_snapshot_receive_retirements(
+ request_id TEXT PRIMARY KEY REFERENCES jwt_v2_receive_requests(request_id),
+ snapshot_id TEXT NOT NULL,retired_at INTEGER NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS jwt_v2_snapshot_receive_slot_immutable
+ BEFORE UPDATE ON jwt_v2_snapshot_receive_slots
+ BEGIN SELECT RAISE(ABORT,'snapshot_receive_slot_immutable'); END;
+CREATE TRIGGER IF NOT EXISTS jwt_v2_snapshot_receive_slot_live
+ BEFORE DELETE ON jwt_v2_snapshot_receive_slots WHEN NOT EXISTS(
+  SELECT 1 FROM jwt_v2_snapshot_receive_retirements WHERE request_id=OLD.request_id)
+ BEGIN SELECT RAISE(ABORT,'snapshot_receive_slot_live'); END;
+CREATE TRIGGER IF NOT EXISTS jwt_v2_snapshot_receive_retirement_immutable
+ BEFORE UPDATE ON jwt_v2_snapshot_receive_retirements
+ BEGIN SELECT RAISE(ABORT,'snapshot_receive_retirement_immutable'); END;
+CREATE TRIGGER IF NOT EXISTS jwt_v2_snapshot_receive_retirement_retained
+ BEFORE DELETE ON jwt_v2_snapshot_receive_retirements
+ BEGIN SELECT RAISE(ABORT,'snapshot_receive_retirement_retained'); END;
+CREATE TRIGGER IF NOT EXISTS jwt_v2_snapshot_receive_page_live
+ BEFORE DELETE ON jwt_v2_receive_pages WHEN EXISTS(
+ SELECT 1 FROM jwt_v2_snapshot_receive_slots z WHERE z.snapshot_id=OLD.snapshot_id AND NOT EXISTS(
+  SELECT 1 FROM jwt_v2_snapshot_receive_retirements r WHERE r.request_id=z.request_id))
+ BEGIN SELECT RAISE(ABORT,'snapshot_receive_page_live'); END;
+CREATE TRIGGER IF NOT EXISTS jwt_v2_snapshot_receive_record_live
+ BEFORE DELETE ON jwt_v2_receive_records WHEN EXISTS(
+ SELECT 1 FROM jwt_v2_snapshot_receive_slots z WHERE z.snapshot_id=OLD.snapshot_id AND NOT EXISTS(
+  SELECT 1 FROM jwt_v2_snapshot_receive_retirements r WHERE r.request_id=z.request_id))
+ BEGIN SELECT RAISE(ABORT,'snapshot_receive_record_live'); END;`;
+
+export async function retireReceivedSnapshot(runtime,requestId){
+ requireThat(['studio','hifz'].includes(runtime.app)&&uuid(requestId),'INVALID_SNAPSHOT_RETIREMENT',400);
+ const store=runtime.store;
+ const retired=async()=>{
+  const row=await store.first('SELECT snapshot_id,retired_at FROM jwt_v2_snapshot_receive_retirements WHERE request_id=?',requestId);
+  return row?{snapshotId:row.snapshot_id,retiredAt:row.retired_at}:null;
+ };
+ const existing=await retired();
+ if(existing)return existing;
+ const scope=`FROM jwt_v2_receive_requests r LEFT JOIN jwt_v2_snapshot_build_receipts b USING(request_id)
+  LEFT JOIN jwt_v2_receive_snapshots s USING(request_id)
+  WHERE r.request_id=? AND json_extract(r.request_json,'$.buildProtocol')=?
+   AND json_extract(coalesce(b.base_json,s.metadata_json),'$.expiresAt')<=unixepoch()`;
+ const snapshot="json_extract(coalesce(b.base_json,s.metadata_json),'$.snapshotId')";
+ const now=await store.first('SELECT '+snapshot+' snapshot_id '+scope,requestId,steppedBuildProtocol);
+ requireThat(now?.snapshot_id,'SNAPSHOT_BUILD_STILL_LIVE',409);
+ const id=now.snapshot_id;
+ const [guard,clear]=store.guard('SELECT 1 '+scope+' AND '+snapshot+'=?',[requestId,steppedBuildProtocol,id]);
+ await store.batch([guard,
+  store.stmt('INSERT INTO jwt_v2_snapshot_receive_retirements VALUES(?,?,unixepoch()) ON CONFLICT(request_id) DO NOTHING',requestId,id),
+  store.stmt("UPDATE jwt_v2_receive_requests SET status='CANCELLED' WHERE request_id=? AND status='PENDING'",requestId),
+  store.stmt('DELETE FROM jwt_v2_receive_pages WHERE snapshot_id=?',id),
+  store.stmt('DELETE FROM jwt_v2_receive_records WHERE snapshot_id=?',id),
+  store.stmt('DELETE FROM jwt_v2_snapshot_receive_slots WHERE request_id=? AND snapshot_id=?',requestId,id),
+  clear]);
+ return retired();
+}
+
 export function snapshotContract(config){const version=config?.snapshotSchema??2;requireThat(version===2||version===3||version===4,'UNSUPPORTED_SNAPSHOT_SCHEMA',409);return version;}
 const baselineBuckets=Object.freeze([...BUCKETS,'accountBaselines']);
 const snapshotBuckets=schema=>schema===4?baselineBuckets:BUCKETS;
@@ -42,7 +120,10 @@ export const snapshotSchemaSQL=[
 ].join('\n');
 
 export function validateReconcileRequest(value,config){
- exact(value,REQUEST);
+ const stepped=Object.hasOwn(value??{},'buildProtocol');
+ exact(value,stepped?[...REQUEST,'buildProtocol']:REQUEST);
+ if(stepped)requireThat(value.buildProtocol===steppedBuildProtocol&&config.snapshotSchema===4
+  &&Array.isArray(value.missingRanges)&&value.missingRanges.length===0,'INVALID_SNAPSHOT_BUILD_PROTOCOL',409);
  requireThat(value.schema===2&&value.env===config.env&&value.ownerApp==='academy'&&['studio','hifz'].includes(value.recipientApp)&&value.recipientApp===config.recipientApp&&value.sourceApp===value.recipientApp&&value.targetApp==='academy'&&uuid(value.requestId)&&ascii(value.stream),'INVALID_RECONCILE_REQUEST',400);
  requireThat(value.ownerEpoch===null||ascii(value.ownerEpoch),'INVALID_OWNER_EPOCH',400);
  requireThat(safeInt(value.contiguousThrough)&&Array.isArray(value.missingRanges)&&value.missingRanges.length<=20,'INVALID_MISSING_RANGES',400);
@@ -279,6 +360,7 @@ export class SnapshotReceiver {
   const row=await this.store.first('SELECT * FROM jwt_v2_receive_requests WHERE request_id=?',meta.requestId);
   requireThat(row&&['PENDING','COMPLETE'].includes(row.status),'UNREQUESTED_RECONCILIATION_REPLY',409);
   const request=validateReconcileRequest(strictJSON(row.request_json),this.config);
+  if(request.buildProtocol===steppedBuildProtocol)requireThat(this.config.snapshotBuildSteps===true,'SNAPSHOT_BUILD_PROFILE_CHANGED',409);
   requireThat(row.request_binding===requestBinding(request)&&request.requestId===meta.requestId&&request.env===meta.env&&request.ownerApp===meta.ownerApp&&request.recipientApp===meta.recipientApp&&request.stream===meta.stream,'RECONCILE_RESPONSE_BINDING_CONFLICT',409);
   const same=request.ownerEpoch===meta.ownerEpoch;
   const genesis=request.ownerEpoch===null&&this.trust.currentEpoch===null&&this.trust.genesisEpoch===meta.ownerEpoch;
@@ -287,23 +369,91 @@ export class SnapshotReceiver {
   requireThat(genesis||(same?meta.coveredThrough>=request.contiguousThrough:meta.predecessorCoveredThrough>=request.contiguousThrough),'RECONCILE_WATERMARK_REGRESSION',409);
   return row;
  }
- async stage(raw,{now}){
+ async stageBuildProgress(request,reply,{now}){
+  await this.ready;
+  exact(reply,['mode','base','requestDigest','phase','cursor','code']);
+  const meta=reply.base,phase=buildPhases.indexOf(reply.phase);
+  requireThat(reply.mode==='BUILD_PENDING'&&request.buildProtocol===steppedBuildProtocol&&this.config.snapshotBuildSteps===true&&request.pageToken===null
+   &&phase>=0&&safeInt(reply.cursor)&&reply.code===(reply.phase==='BLOCKED'?'SNAPSHOT_BUILD_ENVELOPE_EXCEEDED':null)
+   &&meta?.requestId===request.requestId&&equal(reply.requestDigest,await digest(JSON.parse(requestBinding(request)))),
+   'SNAPSHOT_BUILD_REPLY_CONFLICT',409);
+  validateBase(meta,this.config,now);
+  validateEpoch(meta,this.trust);
+  const pending=await this.pendingFor(meta),base=canonical(meta);
+  const [guard,clear]=this.store.guard(`SELECT 1 FROM jwt_v2_receive_requests r
+    WHERE r.request_id=? AND r.request_binding=? AND r.status IN('PENDING','COMPLETE')
+    AND ?>unixepoch()
+    AND NOT EXISTS(SELECT 1 FROM jwt_v2_snapshot_receive_retirements t WHERE t.request_id=r.request_id)
+    AND NOT EXISTS(SELECT 1 FROM jwt_v2_receive_snapshots s WHERE s.request_id=r.request_id
+      AND (s.snapshot_id<>? OR json_remove(s.metadata_json,'$.totalRecords','$.bucketCounts','$.pageCount')<>?))
+    AND NOT EXISTS(SELECT 1 FROM jwt_v2_snapshot_build_receipts b WHERE b.request_id=r.request_id
+      AND (b.base_json<>? OR b.request_digest<>?))`,
+   [meta.requestId,pending.request_binding,meta.expiresAt,meta.snapshotId,base,base,reply.requestDigest]);
+  const watermarks=meta.predecessorEpoch===null
+   ?[[meta.ownerEpoch,meta.coveredThrough]]
+   :[[meta.ownerEpoch,meta.coveredThrough],[meta.predecessorEpoch,meta.predecessorCoveredThrough]];
+  await this.store.batch([guard,
+   this.store.stmt(`INSERT INTO jwt_v2_snapshot_build_receipts VALUES(?,?,?,?,?)
+    ON CONFLICT(request_id) DO UPDATE SET phase=excluded.phase,cursor=excluded.cursor
+    WHERE excluded.phase>jwt_v2_snapshot_build_receipts.phase OR excluded.phase=jwt_v2_snapshot_build_receipts.phase
+     AND excluded.cursor>jwt_v2_snapshot_build_receipts.cursor`,
+    meta.requestId,base,reply.requestDigest,phase,reply.cursor),
+   ...watermarks.map(([epoch,coveredThrough])=>this.store.stmt(`INSERT INTO jwt_v2_event_streams
+    (source_app,target_app,stream,owner_epoch,contiguous_through,highest_seen) VALUES(?,?,?,?,0,?)
+    ON CONFLICT(source_app,target_app,stream,owner_epoch)
+    DO UPDATE SET highest_seen=max(highest_seen,excluded.highest_seen)`,
+    meta.ownerApp,meta.recipientApp,meta.stream,epoch,coveredThrough)),
+   clear]);
+ }
+ async stage(raw,{now,observeWatermark=false}){
   // Low-level adapter: transport authentication must precede this call. It never grants API authority.
   await this.ready;
   const {page,meta,text}=validatePage(raw,{config:this.config,recordConfig:this.recordConfig,trust:this.trust,now});
-  await this.pendingFor(meta);
+  const pending=await this.pendingFor(meta);
+  const buildCheck=strictJSON(pending.request_json).buildProtocol===steppedBuildProtocol;
+  if(buildCheck){
+   const digestReads=Object.values(meta.bucketCounts).reduce((n,c)=>n+(c?Math.floor(c/20)+1:0),0);
+   requireThat(meta.totalRecords<=snapshotBuildLimits.records&&meta.pageCount<=snapshotBuildLimits.pages
+    &&digestReads<=snapshotBuildLimits.digestReads,'SNAPSHOT_BUILD_ENVELOPE_EXCEEDED',409);
+  }
   const unsigned=Object.fromEntries(Object.entries(page).filter(([k])=>k!=='pageDigest'));
   requireThat(equal(page.pageDigest,await domainDigest(snapshotDomain(meta,'snapshot-page'),unsigned)),'SNAPSHOT_PAGE_DIGEST',409);
   if(page.pageIndex===0)requireThat(equal(page.previousPageDigest,await domainDigest(snapshotDomain(meta,'snapshot-start'),{metadata:meta,snapshotDigest:page.snapshotDigest})),'SNAPSHOT_CHAIN_SEED',409);
-  let capture=await this.store.first('SELECT * FROM jwt_v2_receive_snapshots WHERE snapshot_id=? OR request_id=?',meta.snapshotId,meta.requestId);
-  requireThat(!capture||capture.snapshot_id===meta.snapshotId&&capture.metadata_json===canonical(meta)&&capture.snapshot_digest===page.snapshotDigest,'SNAPSHOT_METADATA_CONFLICT',409);
-  if(!capture)await this.store.stmt("INSERT INTO jwt_v2_receive_snapshots VALUES(?,?,?,?,'STAGED') ON CONFLICT DO NOTHING",meta.snapshotId,meta.requestId,canonical(meta),page.snapshotDigest).run();
-  capture=await this.store.first('SELECT * FROM jwt_v2_receive_snapshots WHERE snapshot_id=? OR request_id=?',meta.snapshotId,meta.requestId);
-  requireThat(capture?.snapshot_id===meta.snapshotId&&capture.metadata_json===canonical(meta)&&capture.snapshot_digest===page.snapshotDigest,'SNAPSHOT_METADATA_CONFLICT',409);
-  const old=await this.store.first('SELECT page_json FROM jwt_v2_receive_pages WHERE snapshot_id=? AND page_index=?',meta.snapshotId,page.pageIndex);
-  requireThat(!old||old.page_json===text,'CONFLICTING_DUPLICATE_PAGE',409);
-  if(!old)await this.store.stmt('INSERT INTO jwt_v2_receive_pages VALUES(?,?,?) ON CONFLICT(snapshot_id,page_index) DO NOTHING',meta.snapshotId,page.pageIndex,text).run();
-  const stored=await this.store.first('SELECT page_json FROM jwt_v2_receive_pages WHERE snapshot_id=? AND page_index=?',meta.snapshotId,page.pageIndex);requireThat(stored.page_json===text,'CONFLICTING_DUPLICATE_PAGE',409);
+  const [request,clearRequest]=this.store.guard(`SELECT 1 FROM jwt_v2_receive_requests r
+   WHERE request_id=? AND request_binding=? AND status IN('PENDING','COMPLETE')${buildCheck?
+    ` AND ?>unixepoch()
+      AND NOT EXISTS(SELECT 1 FROM jwt_v2_snapshot_receive_retirements t WHERE t.request_id=r.request_id)
+      AND NOT EXISTS(SELECT 1 FROM jwt_v2_snapshot_build_receipts b WHERE b.request_id=r.request_id AND (b.base_json<>? OR b.phase=5))
+      AND (EXISTS(SELECT 1 FROM jwt_v2_snapshot_receive_slots z WHERE z.request_id=r.request_id AND z.snapshot_id=? AND z.stream=?)
+       OR (SELECT count(*) FROM jwt_v2_snapshot_receive_slots z WHERE z.stream=?)<2)`:''}`,
+   [meta.requestId,pending.request_binding,...(buildCheck?[meta.expiresAt,canonical(pick(meta,BASE)),meta.snapshotId,meta.stream,meta.stream]:[])]);
+  const [header,clearHeader]=this.store.guard(`SELECT 1 FROM jwt_v2_receive_snapshots
+   WHERE request_id=? AND snapshot_id=? AND metadata_json=? AND snapshot_digest=?`,
+   [meta.requestId,meta.snapshotId,canonical(meta),page.snapshotDigest]);
+  const [body,clearBody]=this.store.guard(`SELECT 1 FROM jwt_v2_receive_pages
+   WHERE snapshot_id=? AND page_index=? AND page_json=?`,[meta.snapshotId,page.pageIndex,text]);
+  try{
+   await this.store.batch([
+   request,
+   this.store.stmt("INSERT INTO jwt_v2_receive_snapshots VALUES(?,?,?,?,'STAGED') ON CONFLICT DO NOTHING",
+    meta.snapshotId,meta.requestId,canonical(meta),page.snapshotDigest),
+   header,
+   ...(buildCheck?[this.store.stmt('INSERT INTO jwt_v2_snapshot_receive_slots VALUES(?,?,?) ON CONFLICT(request_id) DO NOTHING',
+    meta.requestId,meta.snapshotId,meta.stream)]:[]),
+   this.store.stmt('INSERT INTO jwt_v2_receive_pages VALUES(?,?,?) ON CONFLICT(snapshot_id,page_index) DO NOTHING',meta.snapshotId,page.pageIndex,text),
+   body,
+   ...(observeWatermark?[this.store.stmt(`UPDATE jwt_v2_event_streams SET highest_seen=max(highest_seen,?)
+    WHERE source_app=? AND target_app=? AND stream=? AND owner_epoch=?`,
+    meta.coveredThrough,meta.ownerApp,meta.recipientApp,meta.stream,meta.ownerEpoch)]:[]),
+   clearBody,clearHeader,clearRequest
+  ]);
+  }catch(error){
+   const capture=await this.store.first('SELECT * FROM jwt_v2_receive_snapshots WHERE snapshot_id=? OR request_id=?',meta.snapshotId,meta.requestId);
+   requireThat(!capture||capture.snapshot_id===meta.snapshotId&&capture.metadata_json===canonical(meta)&&capture.snapshot_digest===page.snapshotDigest,'SNAPSHOT_METADATA_CONFLICT',409);
+   const prior=await this.store.first('SELECT page_json FROM jwt_v2_receive_pages WHERE snapshot_id=? AND page_index=?',meta.snapshotId,page.pageIndex);
+   requireThat(!prior||prior.page_json===text,'CONFLICTING_DUPLICATE_PAGE',409);
+   throw error;
+  }
   return this.verify(meta.snapshotId,{now});
  }
  async verify(snapshotId,{now}){

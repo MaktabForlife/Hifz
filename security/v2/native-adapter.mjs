@@ -1,5 +1,5 @@
 import {academyOwnsProfiles} from '../../worker/src/profile-ownership.js';
-import {canonical,requireThat,reject,safeInt,ascii,bytes,b64u,sha256,vectorDigest} from './codec.mjs';
+import {canonical,requireThat,safeInt,ascii,bytes,b64u,sha256,vectorDigest} from './codec.mjs';
 
 const pick=(row,keys)=>Object.fromEntries(keys.filter(k=>Object.hasOwn(row,k)).map(k=>[k,row[k]]));
 const validId=value=>requireThat(typeof value==='string'&&bytes(value).length>0&&bytes(value).length<=180&&!/[\u0000-\u0020\u007f]/.test(value),'INVALID_NATIVE_ID',400);
@@ -56,15 +56,12 @@ export class HifzNativeAdapter {
  async capture({sub,sourceCredentialEpoch}){
   validId(sub);requireThat(safeInt(sourceCredentialEpoch,1),'SOURCE_CREDENTIAL_EPOCH_REQUIRED',503);
   const vat=this.clock();requireThat(safeInt(vat),'NATIVE_CLOCK_REQUIRED',503);
-  for(let attempt=0;attempt<2;attempt++){
-   const {vector:before,identity}=await this.captureInputs(sub);
-   requireThat(identity.sourceCredentialEpoch===sourceCredentialEpoch,'CREDENTIAL_CHANGED',401);
-   const {vector:after,identity:current}=await this.captureInputs(identity.sub);
-   if(canonical(before.rows)!==canonical(after.rows)||canonical(identity)!==canonical(current))continue;
-   const checkedAt=this.clock();requireThat(safeInt(checkedAt)&&checkedAt>=vat&&checkedAt<vat+900,'NATIVE_VALIDATION_EXPIRED',503);
-   return {app:'hifz',sub:identity.sub,nativeStudentId:identity.nativeStudentId,sourceCredentialEpoch,rights:bounded({nativeStudentId:identity.nativeStudentId,role:identity.role}),sourceProvenance:{revision:identity.sourceRevision,credentialEpoch:identity.sourceCredentialEpoch,pinResetVersion:identity.pinResetVersion,freshContact:false},ownerVector:after.ownerVector,vectorGuards:after.vectorGuards,pv:after.pv,vat,primaryCheckedAt:checkedAt,timedUntil:Number.MAX_SAFE_INTEGER};
-  }
-  reject('NATIVE_AUTHORITY_CHANGED_DURING_CAPTURE',503);
+  // All native rights here come from the mapping row in the same primary
+  // batch as the dependency vector. Issuance checks both again at commit.
+  const {vector,identity}=await this.captureInputs(sub);
+  requireThat(identity.sourceCredentialEpoch===sourceCredentialEpoch,'CREDENTIAL_CHANGED',401);
+  const checkedAt=this.clock();requireThat(safeInt(checkedAt)&&checkedAt>=vat&&checkedAt<vat+900,'NATIVE_VALIDATION_EXPIRED',503);
+  return {app:'hifz',sub:identity.sub,nativeStudentId:identity.nativeStudentId,sourceCredentialEpoch,rights:bounded({nativeStudentId:identity.nativeStudentId,role:identity.role}),sourceProvenance:{revision:identity.sourceRevision,credentialEpoch:identity.sourceCredentialEpoch,pinResetVersion:identity.pinResetVersion,freshContact:false},ownerVector:vector.ownerVector,vectorGuards:vector.vectorGuards,pv:vector.pv,vat,primaryCheckedAt:checkedAt,timedUntil:Number.MAX_SAFE_INTEGER};
  }
 }
 export const hifzNativeAdapterBoundary=Object.freeze({

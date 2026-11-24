@@ -66,6 +66,35 @@ async function advance(store,e){
  }
  if(through>stream.contiguous_through)await store.stmt('UPDATE jwt_v2_event_streams SET contiguous_through=max(contiguous_through,?) WHERE source_app=? AND target_app=? AND stream=? AND owner_epoch=?',through,e.sourceApp,e.targetApp,e.stream,e.ownerEpoch).run();
 }
+const logoutCutoff=event=>event.target.type==='accountCutoff'&&event.target.reason==='VOLUNTARY_LOGOUT';
+
+async function finishLogoutEvent(store,event){
+ const {eventId,digest,sourceApp,targetApp,stream,ownerEpoch}=event;
+ const scope=[sourceApp,targetApp,stream,ownerEpoch];
+ const [, , receipt]=await store.batch([
+  ["UPDATE jwt_v2_events AS e SET state='APPLIED',applied_ref=e.event_id WHERE e.event_id=? AND e.digest=? AND e.state='CAPTURED' "+
+   "AND EXISTS(SELECT 1 FROM jwt_v2_worksets w WHERE w.work_id=e.event_id AND w.state='APPLIED') "+
+   "AND NOT EXISTS(SELECT 1 FROM jwt_v2_publications p WHERE p.work_id=e.event_id AND p.published_cr IS NULL AND p.covered_by_expiry=0) "+
+   "AND NOT EXISTS(SELECT 1 FROM jwt_v2_control_publications p WHERE p.work_id=e.event_id AND p.covered=0)",
+   eventId,digest],
+  ["UPDATE jwt_v2_event_streams AS s SET contiguous_through=coalesce(("+
+   "SELECT max(sequence) FROM (SELECT e.sequence,row_number() OVER (ORDER BY e.sequence) AS position FROM jwt_v2_events e "+
+   "WHERE e.source_app=s.source_app AND e.target_app=s.target_app AND e.stream=s.stream AND e.owner_epoch=s.owner_epoch "+
+   "AND e.sequence>s.contiguous_through AND e.sequence<=min(s.contiguous_through+256,9007199254740991) AND e.state='APPLIED') "+
+   "WHERE sequence=s.contiguous_through+position),s.contiguous_through) "+
+   "WHERE s.source_app=? AND s.target_app=? AND s.stream=? AND s.owner_epoch=? "+
+   "AND s.contiguous_through<s.highest_seen "+
+   "AND EXISTS(SELECT 1 FROM jwt_v2_events WHERE event_id=? AND digest=? AND state='APPLIED')",
+   ...scope,eventId,digest],
+  ["SELECT e.state,e.applied_ref,s.contiguous_through,s.highest_seen FROM jwt_v2_events e "+
+   "JOIN jwt_v2_event_streams s USING(source_app,target_app,stream,owner_epoch) WHERE e.event_id=? AND e.digest=?",
+   eventId,digest]
+ ].map(([sql,...args])=>store.stmt(sql,...args)));
+ const result=receipt.results[0];
+ requireThat(result,'LOGOUT_EVENT_STATE_UNAVAILABLE',503);
+ return result;
+}
+
 export async function receiveBatch({body,config,store,streams,dependencies,planEffect,publishAndCovered}){
  // Call only after authenticateService; no endpoint/router exports an unauthenticated transport.
  const raw=typeof body==='string'?bytes(body):body;requireThat(raw.byteLength<=65536,'BODY_TOO_LARGE',413);
@@ -73,7 +102,7 @@ export async function receiveBatch({body,config,store,streams,dependencies,planE
  requireThat(batch.schema===2&&batch.env===config.env&&batch.sourceApp==='academy'&&batch.targetApp===config.app&&['studio','hifz'].includes(config.app)&&uuid(batch.batchId)&&Array.isArray(batch.events)&&batch.events.length>=1&&batch.events.length<=20,'INVALID_BATCH',400);
  const results=[];
  for(const event of batch.events){
-  let state='CONFLICT',reason=null,appliedRef=null;
+  let state='CONFLICT',reason=null,appliedRef=null,observed;
   try{
    await validateEvent(event,{env:config.env,targetApp:config.app,streams,dependencies});
    let known=await store.first('SELECT * FROM jwt_v2_events WHERE event_id=? OR (source_app=? AND target_app=? AND stream=? AND owner_epoch=? AND sequence=?)',event.eventId,event.sourceApp,event.targetApp,event.stream,event.ownerEpoch,event.sequence);
@@ -88,13 +117,19 @@ export async function receiveBatch({body,config,store,streams,dependencies,planE
    }
    state=known.state;
    if(state!=='APPLIED')await publishAndCovered(event);
-   const barrier=await store.first("SELECT state FROM jwt_v2_worksets WHERE work_id=?",event.eventId);
-   if(state!=='APPLIED'&&barrier?.state==='APPLIED'){
-    appliedRef=event.eventId;await store.stmt("UPDATE jwt_v2_events SET state='APPLIED',applied_ref=? WHERE event_id=? AND digest=?",appliedRef,event.eventId,event.digest).run();state='APPLIED';
-   }else if(state==='APPLIED')appliedRef=known.applied_ref;
-   if(state==='APPLIED')await advance(store,event);
+   if(logoutCutoff(event)){
+    observed=await finishLogoutEvent(store,event);
+    state=observed.state;
+    appliedRef=observed.applied_ref;
+   }else{
+    const barrier=await store.first("SELECT state FROM jwt_v2_worksets WHERE work_id=?",event.eventId);
+    if(state!=='APPLIED'&&barrier?.state==='APPLIED'){
+     appliedRef=event.eventId;await store.stmt("UPDATE jwt_v2_events SET state='APPLIED',applied_ref=? WHERE event_id=? AND digest=?",appliedRef,event.eventId,event.digest).run();state='APPLIED';
+    }else if(state==='APPLIED')appliedRef=known.applied_ref;
+    if(state==='APPLIED')await advance(store,event);
+   }
   }catch(error){reason=error.code||'CAPTURE_FAILED';if(error.status>=500||!error.status){const captured=event?.eventId&&await store.first('SELECT state FROM jwt_v2_events WHERE event_id=?',event.eventId);state=captured?'CAPTURED':'CONFLICT';}}
-  const stream=event?.stream&&await store.first('SELECT * FROM jwt_v2_event_streams WHERE source_app=? AND target_app=? AND stream=? AND owner_epoch=?',batch.sourceApp,batch.targetApp,event.stream,event.ownerEpoch);
+  const stream=observed??(event?.stream&&await store.first('SELECT * FROM jwt_v2_event_streams WHERE source_app=? AND target_app=? AND stream=? AND owner_epoch=?',batch.sourceApp,batch.targetApp,event.stream,event.ownerEpoch));
   results.push({eventId:event?.eventId||null,digest:event?.digest||null,status:state,reason,appliedRef,stream:event?.stream||null,ownerEpoch:event?.ownerEpoch||null,contiguousThrough:stream?.contiguous_through??0,highestSeen:stream?.highest_seen??0,gapPending:stream?stream.contiguous_through<stream.highest_seen:false,retryAfterSeconds:state==='CAPTURED'?1:0});
  }
  return {schema:2,batchId:batch.batchId,results};

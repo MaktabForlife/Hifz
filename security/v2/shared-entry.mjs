@@ -294,9 +294,14 @@ export async function completeSharedEntry(runtime,request,body){
  await publishSharedRetirements(runtime,result.sid);
  const publication=await runtime.publishWinningFamily(result.sid,{initial:true});
  requireThat(publication.cachePublication==='READY','CHILD_AUTHORITY_PENDING',503);
- const family=await store.family(result.sid),pair=JSON.parse(family.projection_json).sharedAcademyAdmission;
  const appAfter=await runtime.appControl();
- requireThat(pair?.kid===kid&&family.cr===1&&family.state===barrier.state&&appAfter.sharedAcademyRegistryRevision===app.sharedAcademyRegistryRevision&&!appAfter.withdrawnSharedAcademyKids?.includes(kid)&&await store.first(gate.sql,...gate.args)&&await store.first(mapping.sql,...mapping.args),'CHILD_AUTHORITY_PENDING',503);
+ const [[family],[ready],[mapped]]=await store.readBatch([
+  ['SELECT * FROM jwt_v2_families WHERE sid=?',result.sid],
+  [gate.sql,...gate.args],
+  [mapping.sql,...mapping.args]
+ ]);
+ const pair=family&&JSON.parse(family.projection_json).sharedAcademyAdmission;
+ requireThat(pair?.kid===kid&&family.cr===1&&family.state===barrier.state&&appAfter.sharedAcademyRegistryRevision===app.sharedAcademyRegistryRevision&&!appAfter.withdrawnSharedAcademyKids?.includes(kid)&&ready&&mapped,'CHILD_AUTHORITY_PENDING',503);
  if(barrier.locked){
   const response=await runtime.cookieResponse(family,plan.credentials.refresh,{...await runtime.stateDTO(family),code:'PIN_REQUIRED',operationId:row.operation_id,returnTo:payload.returnTo,...publication});
   return new Response(response.body,{status:423,headers:response.headers});
